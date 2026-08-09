@@ -1,0 +1,31 @@
+import { CvsScene } from './cvs/CvsScene'
+import { HUD } from './ui/HUD'
+import { KeyboardNav } from './ui/KeyboardNav'
+import { WorkbenchPalette } from './ui/WorkbenchPalette'
+import { OverviewLinkBoard } from './ui/OverviewLinkBoard'
+import { LinkFocusControls } from './ui/LinkFocusControls'
+import { ConstructionLensControls } from './ui/ConstructionLensControls'
+import { ViewPathTimeline } from './ui/ViewPathTimeline'
+import { EmphasisStarMap } from './ui/EmphasisStarMap'
+import './App.css'
+
+export default function App() {
+  return (
+    <div className="app-root">
+      <KeyboardNav />
+      <main className="stage">
+        <CvsScene />
+      </main>
+      <HUD />
+      <EmphasisStarMap />
+      <WorkbenchPalette />
+      <OverviewLinkBoard />
+      <LinkFocusControls />
+      <ConstructionLensControls />
+      <ViewPathTimeline />
+      <footer className="patent-bar">
+        球面宇宙 · 机位时间轴可剪 · 永朝球心
+      </footer>
+    </div>
+  )
+}
