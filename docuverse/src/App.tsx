@@ -7,6 +7,7 @@ import { LinkFocusControls } from './ui/LinkFocusControls'
 import { ConstructionLensControls } from './ui/ConstructionLensControls'
 import { ViewPathTimeline } from './ui/ViewPathTimeline'
 import { EmphasisStarMap } from './ui/EmphasisStarMap'
+import { ReasoningPilotPanel } from './ui/ReasoningPilotPanel'
 import './App.css'
 
 export default function App() {
@@ -17,6 +18,7 @@ export default function App() {
         <CvsScene />
       </main>
       <HUD />
+      <ReasoningPilotPanel />
       <EmphasisStarMap />
       <WorkbenchPalette />
       <OverviewLinkBoard />
@@ -24,7 +26,7 @@ export default function App() {
       <ConstructionLensControls />
       <ViewPathTimeline />
       <footer className="patent-bar">
-        球面宇宙 · 机位时间轴可剪 · 永朝球心
+        球面宇宙 · 推理驾驭层 · 机位时间轴可剪
       </footer>
     </div>
   )

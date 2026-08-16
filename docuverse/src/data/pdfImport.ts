@@ -11,6 +11,7 @@ ensurePdfRuntimePolyfills()
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
 import type { PageDocument, ResolvedConnection } from '../zigzag/types'
+import { extractPdfTextChunks } from './pdfTextLayer'
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker
 
@@ -115,6 +116,7 @@ export async function importPdfFile(
         offsetMap: [],
         sourceDoc: 'upload',
         sourcePage: i,
+        textChunks: [],
       })
       continue
     }
@@ -123,14 +125,21 @@ export async function importPdfFile(
     canvas.width = 0
     canvas.height = 0
 
+    const textChunks = await extractPdfTextChunks(page, viewport, i - 1)
+    const extracted = textChunks
+      .map((c) => c.content)
+      .filter((t) => t.length > 0)
+      .join('\n\n')
+
     pages.push({
       strandIndex: i - 1,
       title: `${label} p.${i}`,
-      text: `${label}\nPage ${i} of ${total}`,
+      text: extracted || `${label}\nPage ${i} of ${total}`,
       offsetMap: [],
       imageUrl,
       sourceDoc: 'upload',
       sourcePage: i,
+      textChunks,
     })
   }
 

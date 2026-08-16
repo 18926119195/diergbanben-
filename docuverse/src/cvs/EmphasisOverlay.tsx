@@ -15,6 +15,7 @@ import {
   type EmphasisStrokeRole,
 } from './emphasisStroke'
 import { LiveInkTrail } from './LiveInkTrail'
+import { useReasoning } from '../reasoning/closureStore'
 
 const noHit = (() => undefined) as unknown as THREE.Mesh['raycast']
 
@@ -41,6 +42,23 @@ function polygonLocalPoints(
   return pts
 }
 
+function bboxOutline(
+  bbox: [number, number, number, number],
+): [number, number, number][] {
+  const [x0, y0, x1, y1] = bbox
+  const corners: PagePoint[] = [
+    [x0, y0],
+    [x1, y0],
+    [x1, y1],
+    [x0, y1],
+    [x0, y0],
+  ]
+  return corners.map(([x, y]) => {
+    const [lx, ly] = pagePointToLocal([x, y], PAGE_W, PAGE_H)
+    return [lx, ly, 0.17] as [number, number, number]
+  })
+}
+
 export function EmphasisOverlay({
   strandIndex,
   isCurrent,
@@ -62,6 +80,7 @@ export function EmphasisOverlay({
   const constructionLinkId = useDocuverse((s) => s.constructionLinkId)
   const retrospectiveLinkId = useDocuverse((s) => s.retrospectiveLinkId)
   const links = useDocuverse((s) => s.emphasisLinks)
+  const lockBoxes = useReasoning((s) => s.lockBoxes)
 
   const mine = useMemo(
     () => edges.filter((e) => e.strandIndex === strandIndex),
@@ -108,6 +127,21 @@ export function EmphasisOverlay({
 
   return (
     <group>
+      {lockBoxes
+        .filter((b) => b.page === strandIndex)
+        .map((b, i) => {
+          const loop = bboxOutline(b.bbox)
+          return loop.length >= 2 ? (
+            <Line
+              key={`lock-${i}-${b.bbox.join(',')}`}
+              points={loop}
+              color="#5cffb1"
+              lineWidth={1.8}
+              dashed
+              dashScale={8}
+            />
+          ) : null
+        })}
       {mine.map((edge) => {
         const isRelationFigure = relationFigureIds?.has(edge.id) ?? false
         const isA = edge.id === emphasisLinkFromId

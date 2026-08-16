@@ -1,0 +1,511 @@
+import { create } from 'zustand'
+import { classifyIntervalRelation } from './intrinsicKey'
+import { cosine, textToProbe } from './lexicalProbe'
+import type { CircleCandidate } from './pipelineA'
+import type {
+  DialogueClosure,
+  DirectionRecord,
+  InstructionBundle,
+  IntrinsicCoordinate,
+  LinkType,
+  LockBox,
+  ReasonEdge,
+} from './types'
+
+const STORAGE_PREFIX = 'docuverse.reasoning.v4:'
+
+function newDirectionId(): string {
+  return `dir_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null
+}
+
+function isPlaceFaces(v: unknown): boolean {
+  if (!isRecord(v)) return false
+  let ok = false
+  if (v.text !== undefined) {
+    if (
+      !isRecord(v.text) ||
+      typeof v.text.start !== 'number' ||
+      typeof v.text.end !== 'number' ||
+      typeof v.text.content !== 'string'
+    ) {
+      return false
+    }
+    ok = true
+  }
+  if (v.fig !== undefined) {
+    if (
+      !isRecord(v.fig) ||
+      typeof v.fig.figId !== 'string' ||
+      typeof v.fig.note !== 'string'
+    ) {
+      return false
+    }
+    if (
+      v.fig.imageRef !== undefined &&
+      typeof v.fig.imageRef !== 'string'
+    ) {
+      return false
+    }
+    ok = true
+  }
+  return ok
+}
+
+function isR(v: unknown): v is IntrinsicCoordinate {
+  if (!isRecord(v)) return false
+  const sourceOk =
+    v.source === 'ocr' ||
+    v.source === 'pdf_text' ||
+    v.source === 'page_text' ||
+    v.source === 'layout_fig'
+  if (
+    typeof v.docId !== 'string' ||
+    typeof v.start !== 'number' ||
+    typeof v.end !== 'number' ||
+    typeof v.key !== 'string' ||
+    typeof v.page !== 'number' ||
+    typeof v.emphasisId !== 'string' ||
+    !Array.isArray(v.chunkIds) ||
+    !sourceOk ||
+    !isPlaceFaces(v.faces)
+  ) {
+    return false
+  }
+  if (v.kind === 'fig') return typeof v.figId === 'string'
+  if (v.kind === 'text') return true
+  return false
+}
+
+function isClosure(v: unknown): v is DialogueClosure {
+  if (!isRecord(v)) return false
+  return (
+    typeof v.key === 'string' &&
+    isR(v.R) &&
+    typeof v.excerpt === 'string' &&
+    Array.isArray(v.directions) &&
+    typeof v.createdAt === 'number' &&
+    typeof v.updatedAt === 'number'
+  )
+}
+
+function loadMap(corpus: string): Record<string, DialogueClosure> {
+  try {
+    const raw = localStorage.getItem(STORAGE_PREFIX + corpus)
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (!isRecord(parsed)) return {}
+    const out: Record<string, DialogueClosure> = {}
+    for (const [k, val] of Object.entries(parsed)) {
+      if (isClosure(val)) out[k] = val
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function saveMap(corpus: string, map: Record<string, DialogueClosure>): void {
+  try {
+    localStorage.setItem(STORAGE_PREFIX + corpus, JSON.stringify(map))
+  } catch {
+    /* quota */
+  }
+}
+
+export type PilotPhase =
+  | 'idle'
+  | 'in_closure'
+  | 'await_decision'
+  | 'leave_pick_target'
+  | 'busy'
+
+export interface MatchHit {
+  direction: DirectionRecord
+  score: number
+}
+
+interface ReasoningState {
+  corpus: string
+  closures: Record<string, DialogueClosure>
+  activeR: IntrinsicCoordinate | null
+  activeKey: string | null
+  activeExcerpt: string
+  lockBoxes: LockBox[]
+  lockCandidates: CircleCandidate[]
+  lockError: string | null
+  phase: PilotPhase
+  lastMatches: MatchHit[]
+  pendingQuestion: string
+  /** directions to forbid when staying & inferring */
+  forbidIds: string[]
+  leaveFromKey: string | null
+  pendingEdge: ReasonEdge | null
+  lastBundle: InstructionBundle | null
+  lastLog: string[]
+  lastConclusion: string | null
+  lastPath: string | null
+  error: string | null
+
+  setCorpus: (corpus: string) => void
+  activateResolved: (input: {
+    chosen: CircleCandidate
+    candidates: CircleCandidate[]
+  }) => void
+  setLockFailure: (message: string) => void
+  pickCandidate: (key: string) => void
+  clearActive: () => void
+  ensureClosure: (R: IntrinsicCoordinate, excerpt: string) => DialogueClosure
+  runLocalMatch: (question: string) => MatchHit[]
+  chooseReuse: (directionId: string) => void
+  hangVariantOn: (directionId: string, question: string) => void
+  toggleForbid: (directionId: string) => void
+  beginLeave: () => void
+  cancelLeave: () => void
+  confirmLeaveToResolved: (
+    chosen: CircleCandidate,
+    linkType: LinkType,
+  ) => void
+  setPendingQuestion: (q: string) => void
+  rememberInferResult: (input: {
+    bundle: InstructionBundle
+    question: string
+    path: string
+    conclusion: string
+  }) => void
+  pushLog: (line: string) => void
+  setError: (msg: string | null) => void
+  setPhase: (p: PilotPhase) => void
+  setLastBundle: (b: InstructionBundle | null) => void
+}
+
+export const useReasoning = create<ReasoningState>((set, get) => ({
+  corpus: 'pdf',
+  closures: loadMap('pdf'),
+  activeR: null,
+  activeKey: null,
+  activeExcerpt: '',
+  lockBoxes: [],
+  lockCandidates: [],
+  lockError: null,
+  phase: 'idle',
+  lastMatches: [],
+  pendingQuestion: '',
+  forbidIds: [],
+  leaveFromKey: null,
+  pendingEdge: null,
+  lastBundle: null,
+  lastLog: [],
+  lastConclusion: null,
+  lastPath: null,
+  error: null,
+
+  setCorpus: (corpus) => {
+    set({
+      corpus,
+      closures: loadMap(corpus),
+      activeR: null,
+      activeKey: null,
+      activeExcerpt: '',
+      lockBoxes: [],
+      lockCandidates: [],
+      lockError: null,
+      phase: 'idle',
+      lastMatches: [],
+      forbidIds: [],
+      leaveFromKey: null,
+      pendingEdge: null,
+    })
+  },
+
+  pushLog: (line) =>
+    set((s) => ({
+      lastLog: [
+        `${Date.now()}|${new Date().toLocaleTimeString()} ${line}`,
+        ...s.lastLog,
+      ].slice(0, 40),
+    })),
+
+  setError: (msg) => set({ error: msg }),
+  setPhase: (p) => set({ phase: p }),
+  setLastBundle: (b) => set({ lastBundle: b }),
+  setPendingQuestion: (q) => set({ pendingQuestion: q }),
+
+  ensureClosure: (R, excerpt) => {
+    const { corpus, closures } = get()
+    const existing = closures[R.key]
+    if (existing) return existing
+    const created: DialogueClosure = {
+      key: R.key,
+      R,
+      excerpt,
+      directions: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    const next = { ...closures, [R.key]: created }
+    saveMap(corpus, next)
+    set({ closures: next })
+    return created
+  },
+
+  activateResolved: ({ chosen, candidates }) => {
+    const cur = get()
+    if (
+      cur.phase !== 'leave_pick_target' &&
+      cur.activeKey === chosen.R.key &&
+      (cur.phase === 'in_closure' ||
+        cur.phase === 'await_decision' ||
+        cur.phase === 'busy')
+    ) {
+      set({
+        activeR: chosen.R,
+        activeExcerpt: chosen.excerpt,
+        lockBoxes: chosen.boxes,
+        lockCandidates: candidates,
+        lockError: null,
+      })
+      return
+    }
+    get().ensureClosure(chosen.R, chosen.excerpt)
+    const gray = candidates.length > 1
+    set({
+      activeR: chosen.R,
+      activeKey: chosen.R.key,
+      activeExcerpt: chosen.excerpt,
+      lockBoxes: chosen.boxes,
+      lockCandidates: candidates,
+      lockError: null,
+      phase: 'in_closure',
+      lastMatches: [],
+      forbidIds: [],
+      leaveFromKey: null,
+      pendingEdge: null,
+      error: null,
+    })
+    get().pushLog(
+      gray
+        ? `进房 ${chosen.R.key}（灰度 ${candidates.length} 候选，已选最高重叠）`
+        : (() => {
+            const tags = [
+              chosen.R.faces.text ? '文字脸' : null,
+              chosen.R.faces.fig ? '图脸' : null,
+            ].filter(Boolean)
+            return `进房 ${chosen.R.key} · ${tags.join('+') || chosen.R.kind} · p${chosen.R.page}`
+          })(),
+    )
+  },
+
+  setLockFailure: (message) => {
+    set({
+      activeR: null,
+      activeKey: null,
+      activeExcerpt: '',
+      lockBoxes: [],
+      lockCandidates: [],
+      lockError: message,
+      phase: 'idle',
+      error: message,
+    })
+    get().pushLog(`未锁定 A 切片：${message}`)
+  },
+
+  pickCandidate: (key) => {
+    const { lockCandidates, phase } = get()
+    const hit = lockCandidates.find((c) => c.R.key === key)
+    if (!hit) return
+    if (phase === 'leave_pick_target') {
+      set({
+        activeExcerpt: hit.excerpt,
+        lockBoxes: hit.boxes,
+        error: null,
+      })
+      get().pushLog(`B1 候选切到 ${hit.R.key}`)
+      return
+    }
+    get().activateResolved({ chosen: hit, candidates: lockCandidates })
+  },
+
+  clearActive: () =>
+    set({
+      activeR: null,
+      activeKey: null,
+      activeExcerpt: '',
+      lockBoxes: [],
+      lockCandidates: [],
+      lockError: null,
+      phase: 'idle',
+      lastMatches: [],
+      forbidIds: [],
+      leaveFromKey: null,
+      pendingEdge: null,
+    }),
+
+  runLocalMatch: (question) => {
+    const { activeKey, closures } = get()
+    if (!activeKey) return []
+    const c = closures[activeKey]
+    if (!c) return []
+    const probe = textToProbe(question)
+    const hits: MatchHit[] = c.directions
+      .map((d) => ({ direction: d, score: cosine(probe, d.probe) }))
+      .filter((h) => h.score >= 0.35)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+    set({
+      pendingQuestion: question,
+      lastMatches: hits,
+      phase: 'await_decision',
+      error: null,
+    })
+    get().pushLog(
+      hits.length
+        ? `房内命中 ${hits.length} 条方向（Top1=${hits[0].score.toFixed(2)}）`
+        : '房内无近似方向 → 可直接推理或退房',
+    )
+    return hits
+  },
+
+  chooseReuse: (directionId) => {
+    const { activeKey, closures, pendingQuestion } = get()
+    if (!activeKey) return
+    const c = closures[activeKey]
+    const d = c?.directions.find((x) => x.directionId === directionId)
+    if (!d) return
+    get().hangVariantOn(directionId, pendingQuestion)
+    set({
+      lastConclusion: d.conclusion,
+      lastPath: d.path,
+      phase: 'in_closure',
+      lastMatches: [],
+    })
+    get().pushLog(`复用短路 · 未调用主模型 · ${directionId}`)
+  },
+
+  hangVariantOn: (directionId, question) => {
+    const { corpus, closures, activeKey } = get()
+    if (!activeKey || !question.trim()) return
+    const c = closures[activeKey]
+    if (!c) return
+    const directions = c.directions.map((d) => {
+      if (d.directionId !== directionId) return d
+      if (d.variants.includes(question) || d.questionText === question) return d
+      return { ...d, variants: [...d.variants, question] }
+    })
+    const nextC = { ...c, directions, updatedAt: Date.now() }
+    const next = { ...closures, [activeKey]: nextC }
+    saveMap(corpus, next)
+    set({ closures: next })
+  },
+
+  toggleForbid: (directionId) => {
+    set((s) => ({
+      forbidIds: s.forbidIds.includes(directionId)
+        ? s.forbidIds.filter((id) => id !== directionId)
+        : [...s.forbidIds, directionId],
+    }))
+  },
+
+  beginLeave: () => {
+    const { activeKey } = get()
+    if (!activeKey) return
+    set({
+      leaveFromKey: activeKey,
+      phase: 'leave_pick_target',
+      pendingEdge: null,
+    })
+    get().pushLog('退房：请再选另一强调区作为新分析对象')
+  },
+
+  cancelLeave: () => {
+    set({ leaveFromKey: null, phase: 'in_closure', pendingEdge: null })
+    get().pushLog('取消退房')
+  },
+
+  confirmLeaveToResolved: (chosen, linkType) => {
+    const { leaveFromKey, closures } = get()
+    if (!leaveFromKey) return
+    const fromC = closures[leaveFromKey]
+    if (!fromC) return
+    const toR = chosen.R
+    get().ensureClosure(toR, chosen.excerpt)
+    const rel = classifyIntervalRelation(fromC.R, toR)
+    if (rel.adjust === 'same') {
+      set({ error: '对象未变：请改用「留房 + 排除旧方向」，而非退房' })
+      return
+    }
+    const premise =
+      linkType === 'none' || linkType === 'contrast' || linkType === 'explore'
+        ? undefined
+        : fromC.directions.length > 0
+          ? {
+              conclusion: fromC.directions[fromC.directions.length - 1].conclusion,
+              pathSummary: fromC.directions[fromC.directions.length - 1].path,
+              fromKey: leaveFromKey,
+            }
+          : undefined
+
+    const edge: ReasonEdge = {
+      fromKey: leaveFromKey,
+      toKey: toR.key,
+      relation: rel.relation,
+      adjust: rel.adjust,
+      linkType,
+      premiseConclusion: premise?.conclusion,
+      premisePath: premise?.pathSummary,
+    }
+    set({
+      activeR: toR,
+      activeKey: toR.key,
+      activeExcerpt: chosen.excerpt,
+      lockBoxes: chosen.boxes,
+      lockCandidates: [chosen],
+      phase: 'in_closure',
+      leaveFromKey: null,
+      pendingEdge: edge,
+      lastMatches: [],
+      forbidIds: [],
+      error: null,
+    })
+    get().pushLog(
+      `B1 再入 ${toR.key} · ${rel.relation}/${rel.adjust ?? '-'} · link=${linkType}`,
+    )
+  },
+
+  rememberInferResult: ({ bundle, question, path, conclusion }) => {
+    const { corpus, closures, activeKey } = get()
+    if (!activeKey) return
+    const c = closures[activeKey]
+    if (!c) return
+    const rec: DirectionRecord = {
+      directionId: newDirectionId(),
+      questionText: question,
+      probe: textToProbe(question),
+      path,
+      conclusion,
+      createdAt: Date.now(),
+      variants: [],
+    }
+    const nextC: DialogueClosure = {
+      ...c,
+      directions: [...c.directions, rec],
+      updatedAt: Date.now(),
+    }
+    const next = { ...closures, [activeKey]: nextC }
+    saveMap(corpus, next)
+    set({
+      closures: next,
+      lastBundle: bundle,
+      lastConclusion: conclusion,
+      lastPath: path,
+      phase: 'in_closure',
+      lastMatches: [],
+      forbidIds: [],
+      pendingEdge: null,
+    })
+    get().pushLog(`回写方向 ${rec.directionId} · 调用已完成`)
+  },
+}))

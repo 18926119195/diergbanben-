@@ -1489,3 +1489,161 @@ body.emphasize-pen-on .workbench-root * {
   font-size: 0.92em;
 }
 
+/* —— 推理驾驭面板（右上，不挡星图过多） —— */
+.reasoning-pilot {
+  position: absolute;
+  z-index: 12;
+  top: 12px;
+  right: 12px;
+  width: min(360px, 94vw);
+  max-height: calc(100% - 56px);
+  overflow: auto;
+  padding: 14px 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: linear-gradient(
+    160deg,
+    rgba(12, 16, 26, 0.94),
+    rgba(10, 14, 22, 0.88)
+  );
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+}
+
+.reasoning-pilot-title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: 0.03em;
+}
+
+.reasoning-pilot-sub {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-family: var(--mono);
+}
+
+.reasoning-block {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(0, 229, 255, 0.12);
+}
+
+.reasoning-block.leave {
+  border-color: rgba(255, 215, 0, 0.35);
+}
+
+.reasoning-block h3 {
+  margin: 0 0 8px;
+  font-family: var(--display);
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--cyan);
+}
+
+.reasoning-muted {
+  margin: 4px 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.reasoning-mono {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+
+.reasoning-input,
+.reasoning-select {
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 0.9rem;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.reasoning-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.reasoning-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.reasoning-hit {
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.12);
+}
+
+.reasoning-pre {
+  margin: 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 140px;
+  overflow: auto;
+}
+
+.reasoning-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 120px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.reasoning-log li {
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.reasoning-excerpt {
+  margin: 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(0, 40, 28, 0.55);
+  border: 1px solid rgba(92, 255, 177, 0.35);
+  font-family: var(--serif);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow: auto;
+  color: #d7ffe9;
+}
+
+.reasoning-cand-on {
+  outline: 1px solid rgba(92, 255, 177, 0.7);
+}
+
+.reasoning-error {
+  margin-top: 8px;
+  color: #ff8a80;
+  font-size: 0.85rem;
+}
+

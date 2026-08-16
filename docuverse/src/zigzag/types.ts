@@ -72,6 +72,13 @@ export interface ResolvedConnection {
   comment?: string
 }
 
+/** A-pipeline atom on a page: bbox in page_norm_0_1000 + text */
+export interface PageTextChunk {
+  id: string
+  content: string
+  bbox: [number, number, number, number]
+}
+
 export interface PageDocument {
   strandIndex: number
   title: string
@@ -83,4 +90,9 @@ export interface PageDocument {
   /** Source PDF label for HUD grouping */
   sourceDoc?: string
   sourcePage?: number
+  /**
+   * PDF text-layer chunks (A pipeline). Empty on scans until OCR.
+   * Coordinates: page_norm_0_1000, same space as emphasis polygons.
+   */
+  textChunks?: PageTextChunk[]
 }
