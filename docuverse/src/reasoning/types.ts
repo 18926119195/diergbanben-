@@ -1,7 +1,10 @@
 /**
- * Interaction semantics for intrinsic-coordinate reasoning control (vendor spec V3.1).
- * One place lock (key*) may carry text and/or fig faces; page_norm ink is entry only.
+ * Interaction semantics for intrinsic-coordinate reasoning control.
+ * Place lock key* = OCR slot doorplate (doc|slot|p|k) or combo of member slots.
+ * page_norm AABB on the slot is the restore geometry (not re-derived from text).
  */
+
+import type { SlotMemberRef } from './ocrSlot'
 
 export type LinkType =
   | 'incremental'
@@ -47,16 +50,23 @@ export interface IntrinsicCoordinate {
   /** which face owns key* formula */
   kind: PlaceKind
   /**
-   * Canonical key* — hash entry identity.
-   * text-primary: `${docId}|${start}|${end}`
-   * fig-primary:  `${docId}|fig|${figId}`
+   * Canonical key* — slot doorplate or combo hash.
+   * slot: `${docId}|slot|p${page}|k${k}`
+   * combo: `${docId}|combo|${hash(memberKeys)}`
+   * legacy fig alias: `${docId}|fig|${figId}` (still accepted)
    */
   key: string
-  /** inclusive start (text span or fig placeholder span in stream) */
+  /** stream alias offsets (audit / legacy); not the primary doorplate */
   start: number
   end: number
   figId?: string
   page: number
+  /** page-local OCR step k when key is a single slot */
+  slotK?: number
+  /** member slot keys when this lock is a cross-slot combo */
+  memberKeys?: string[]
+  /** audit helpers: pct on each member T + parent AABB */
+  members?: SlotMemberRef[]
   emphasisId: string
   chunkIds: string[]
   source: AChunkSource
@@ -78,6 +88,8 @@ export interface DialogueClosure {
   key: string
   R: IntrinsicCoordinate
   excerpt: string
+  /** Book/dialog closure = arrangement of slot keys (同构) */
+  memberKeys: string[]
   directions: DirectionRecord[]
   createdAt: number
   updatedAt: number

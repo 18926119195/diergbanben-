@@ -16,14 +16,20 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     server: {
+      host: '127.0.0.1',
+      port: 5173,
+      strictPort: true,
       proxy: {
         '/api/zhipu': {
           target: 'https://open.bigmodel.cn',
           changeOrigin: true,
           rewrite: (p) => p.replace(/^\/api\/zhipu/, '/api/paas/v4'),
           configure: (proxy) => {
-            proxy.on('proxyReq', (proxyReq) => {
-              if (apiKey) {
+            proxy.on('proxyReq', (proxyReq, req) => {
+              const existing = req.headers.authorization
+              if (typeof existing === 'string' && existing.length > 0) {
+                proxyReq.setHeader('Authorization', existing)
+              } else if (apiKey) {
                 proxyReq.setHeader('Authorization', `Bearer ${apiKey}`)
               }
             })

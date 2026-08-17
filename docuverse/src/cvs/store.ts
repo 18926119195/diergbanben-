@@ -1,8 +1,6 @@
 import { create } from 'zustand'
 import * as THREE from 'three'
-import { buildConnections } from '../zigzag/edl'
 import type { PageDocument, ResolvedConnection } from '../zigzag/types'
-import { DEMO_EDL, PERMASCROLL } from '../data/demoUniverse'
 import { buildPdfPageUniverse } from '../data/pdfUniverse'
 import {
   buildConstructionTriangle,
@@ -68,7 +66,7 @@ import {
   newOcrBlockId,
   ocrPageHasEdits,
   rebuildOcrMarkdown,
-  runGlmOcrOnImage,
+  runCutEncodeOcrOnImage,
   type OcrBlock,
   type OcrPageResult,
 } from '../data/ocrService'
@@ -76,10 +74,7 @@ import type { FlinkType } from '../zigzag/types'
 
 export type CorpusId = 'pdf' | 'origins' | 'upload'
 
-const originsBuilt = {
-  pages: buildConnections(PERMASCROLL, DEMO_EDL).pages,
-  connections: [] as ResolvedConnection[],
-}
+const emptyBuilt = { pages: [] as PageDocument[], connections: [] as ResolvedConnection[] }
 const pdfBuilt = buildPdfPageUniverse()
 
 let uploadedBuilt: {
@@ -92,10 +87,11 @@ function pack(corpus: CorpusId): {
   pages: PageDocument[]
   connections: ResolvedConnection[]
 } {
-  if (corpus === 'pdf') return pdfBuilt
-  if (corpus === 'origins') return originsBuilt
-  if (uploadedBuilt) return uploadedBuilt
-  return pdfBuilt
+  if (corpus === 'upload' && uploadedBuilt) return uploadedBuilt
+  // pdf / origins demos removed — empty workspace until upload
+  void corpus
+  void pdfBuilt
+  return emptyBuilt
 }
 
 function revokeBlobPages(pages: PageDocument[]): void {
@@ -286,10 +282,10 @@ function framingDistanceForPair(
   return Math.min(inner * 3.5, Math.max(readingOuterRadius(total), inner + sep * 0.55))
 }
 
-const initialBonds = hydrateBonds('pdf', null)
-const initialEmphasis = hydrateEmphasis('pdf', null, pdfBuilt.pages.length)
+const initialBonds = hydrateBonds('upload', null)
+const initialEmphasis = hydrateEmphasis('upload', null, 0)
 const initial = {
-  pages: pdfBuilt.pages,
+  pages: [] as PageDocument[],
   connections: initialBonds.connections,
 }
 const initialOnCurrent = connectionsForStrand(initial.connections, 0)
@@ -519,6 +515,14 @@ interface DocuverseState {
     linkId: string
   } | null>
   runOcrOnCurrentPage: (opts?: { force?: boolean }) => Promise<void>
+  /**
+   * OCR pages that have image but no PDF textChunks and no OCR yet.
+   * Used after upload when autoOcrOnUpload is on.
+   */
+  runOcrOnPagesLackingText: (opts?: {
+    maxPages?: number
+    onProgress?: (done: number, total: number, strand: number) => void
+  }) => Promise<{ done: number; failed: number }>
   closeOcrPanel: () => void
   setOcrHoverBlock: (id: string | null) => void
   setOcrEditingBlockId: (id: string | null) => void
@@ -587,7 +591,7 @@ interface DocuverseState {
 }
 
 export const useDocuverse = create<DocuverseState>((set, get) => ({
-  corpus: 'pdf',
+  corpus: 'upload',
   uploadLabel: null,
   uploadProgress: null,
   pages: initial.pages,
@@ -1436,19 +1440,27 @@ export const useDocuverse = create<DocuverseState>((set, get) => ({
       currentStrand: 0,
       companionStrand: cur
         ? companionOf(cur, 0)
-        : Math.min(1, data.pages.length - 1),
+        : Math.min(1, Math.max(0, data.pages.length - 1)),
       currentConnectionId: cur?.id ?? null,
       connectionsOnCurrent: list,
       connectionCursor: 0,
       cameraDistance: readingOuterRadius(Math.max(data.pages.length, 1)),
       uploadLabel: c === 'upload' ? uploadedBuilt?.label ?? null : get().uploadLabel,
+      // Drop OCR / compare state so boxes never stick on another corpus
       ocrOpen: false,
+      ocrBusy: false,
+      ocrError: null,
       ocrActiveStrand: null,
+      ocrByStrand: {},
       ocrHoverBlock: null,
       ocrEditingBlockId: null,
       ocrInlineEdit: false,
     })
-    triggerSwoop(set, get, 0)
+    // Clear reasoning lock overlays (strand indices collide across corpora)
+    void import('../reasoning/closureStore').then(({ useReasoning }) => {
+      useReasoning.getState().clearActive()
+    })
+    if (data.pages.length > 0) triggerSwoop(set, get, 0)
   },
 
   setUploadProgress: (p) => set({ uploadProgress: p }),
@@ -1533,6 +1545,9 @@ export const useDocuverse = create<DocuverseState>((set, get) => ({
       pipelineSteps,
     )
     saveBondState(bondsStorageKey('upload', data.label), [], [])
+    void import('../reasoning/closureStore').then(({ useReasoning }) => {
+      useReasoning.getState().clearActive()
+    })
     triggerSwoop(set, get)
   },
 
@@ -2160,14 +2175,14 @@ export const useDocuverse = create<DocuverseState>((set, get) => ({
 
     if (existing && force && ocrPageHasEdits(existing)) {
       const ok = window.confirm(
-        '重新识别会覆盖本页 OCR 文本修改（原件页图与 bbox 绑定区域不受影响）。继续？',
+        '重新识别会按「切割即登记」重跑（geom→crop→T），覆盖本页 OCR 文本修改；AABB 与 T0 重新排放。继续？',
       )
       if (!ok) return
     }
 
     if (!page.imageUrl) {
       set({
-        ocrError: '当前页没有图像，无法 OCR（请使用专利 PDF 或上传扫描件）',
+        ocrError: '当前页没有图像，无法 OCR（请先上传带页图的 PDF）',
         ocrOpen: false,
       })
       return
@@ -2189,7 +2204,7 @@ export const useDocuverse = create<DocuverseState>((set, get) => ({
 
     try {
       const dataUri = await imageUrlToDataUri(page.imageUrl)
-      const result = await runGlmOcrOnImage(dataUri, currentStrand)
+      const result = await runCutEncodeOcrOnImage(dataUri, currentStrand)
       set({
         ocrByStrand: { ...get().ocrByStrand, [currentStrand]: result },
         ocrBusy: false,
@@ -2199,16 +2214,79 @@ export const useDocuverse = create<DocuverseState>((set, get) => ({
       pushPipeline(get, set, {
         kind: 'ocr',
         actor: 'system',
-        summary: `OCR 页 s${currentStrand} → ${result.blocks.length} 块（可选工序，非强调前提）`,
+        summary: `切割即登记 OCR s${currentStrand} → ${result.blocks.length} 槽（cutBound）`,
         detail: {
           strandIndex: currentStrand,
           blocks: result.blocks.length,
+          cutBound: result.blocks.filter((b) => b.cutBound).length,
         },
       })
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'OCR 失败'
       set({ ocrBusy: false, ocrError: msg, ocrOpen: true })
     }
+  },
+
+  runOcrOnPagesLackingText: async (opts) => {
+    const { pages, ocrByStrand } = get()
+    const maxPages = opts?.maxPages ?? 40
+    const targets = pages
+      .filter((p) => {
+        if (!p.imageUrl) return false
+        if (ocrByStrand[p.strandIndex]) return false
+        const chunks = p.textChunks
+        if (chunks && chunks.length > 0) return false
+        return true
+      })
+      .slice(0, maxPages)
+
+    if (targets.length === 0) {
+      return { done: 0, failed: 0 }
+    }
+
+    set({
+      ocrBusy: true,
+      ocrError: null,
+      ocrOpen: true,
+      ocrActiveStrand: targets[0].strandIndex,
+    })
+
+    let done = 0
+    let failed = 0
+    for (const page of targets) {
+      if (!page.imageUrl) continue
+      opts?.onProgress?.(done + failed, targets.length, page.strandIndex)
+      try {
+        const dataUri = await imageUrlToDataUri(page.imageUrl)
+        const result = await runCutEncodeOcrOnImage(dataUri, page.strandIndex)
+        set({
+          ocrByStrand: {
+            ...get().ocrByStrand,
+            [page.strandIndex]: result,
+          },
+          ocrActiveStrand: page.strandIndex,
+        })
+        done += 1
+        pushPipeline(get, set, {
+          kind: 'ocr',
+          actor: 'system',
+          summary: `切割即登记 OCR s${page.strandIndex} → ${result.blocks.length} 槽`,
+          detail: {
+            strandIndex: page.strandIndex,
+            blocks: result.blocks.length,
+            cutBound: result.blocks.filter((b) => b.cutBound).length,
+          },
+        })
+      } catch (e) {
+        failed += 1
+        const msg = e instanceof Error ? e.message : 'OCR 失败'
+        set({ ocrError: `页 s${page.strandIndex}: ${msg}` })
+      }
+    }
+
+    set({ ocrBusy: false })
+    opts?.onProgress?.(targets.length, targets.length, targets[targets.length - 1].strandIndex)
+    return { done, failed }
   },
 
   closeOcrPanel: () => {

@@ -20,8 +20,10 @@ export function textToProbe(text: string): number[] {
 }
 
 export function cosine(a: number[], b: number[]): number {
-  const n = Math.min(a.length, b.length)
+  if (a.length === 0 || b.length === 0) return 0
+  // Different embedding spaces must not silently share a prefix
+  if (a.length !== b.length) return 0
   let dot = 0
-  for (let i = 0; i < n; i++) dot += a[i] * b[i]
+  for (let i = 0; i < a.length; i++) dot += a[i] * b[i]
   return dot
 }

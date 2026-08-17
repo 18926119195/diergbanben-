@@ -8,6 +8,7 @@ import { ConstructionLensControls } from './ui/ConstructionLensControls'
 import { ViewPathTimeline } from './ui/ViewPathTimeline'
 import { EmphasisStarMap } from './ui/EmphasisStarMap'
 import { ReasoningPilotPanel } from './ui/ReasoningPilotPanel'
+import { ReasoningFloorDock } from './ui/ReasoningFloorDock'
 import './App.css'
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
       </main>
       <HUD />
       <ReasoningPilotPanel />
+      <ReasoningFloorDock />
       <EmphasisStarMap />
       <WorkbenchPalette />
       <OverviewLinkBoard />

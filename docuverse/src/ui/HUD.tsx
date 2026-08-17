@@ -45,28 +45,16 @@ export function HUD() {
           打开工作台（空格）
         </button>
         <div className="mode-toggle corpus">
-          <button
-            className={corpus === 'pdf' ? 'active' : ''}
-            type="button"
-            onClick={() => setCorpus('pdf')}
-          >
-            专利 PDF 页
-          </button>
-          <button
-            className={corpus === 'origins' ? 'active' : ''}
-            type="button"
-            onClick={() => setCorpus('origins')}
-          >
-            Origins 文本
-          </button>
-          {uploadLabel && (
+          {uploadLabel ? (
             <button
               className={corpus === 'upload' ? 'active' : ''}
               type="button"
               onClick={() => setCorpus('upload')}
             >
-              我的 PDF
+              我的 PDF · {uploadLabel}
             </button>
+          ) : (
+            <span className="meta">请上传 PDF 开始</span>
           )}
         </div>
       </header>
@@ -205,7 +193,7 @@ export function HUD() {
       </section>
 
       <section className="hud-panel keys">
-        <h2>专利导航键</h2>
+        <h2>导航键</h2>
         <div className="key-grid">
           <button type="button" onClick={() => stepConnection(1)}>
             C · 下一连接

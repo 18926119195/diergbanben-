@@ -12,7 +12,8 @@ import type {
   ReasonEdge,
 } from './types'
 
-const STORAGE_PREFIX = 'docuverse.reasoning.v4:'
+/** v5: closures carry memberKeys (slot arrangement) */
+const STORAGE_PREFIX = 'docuverse.reasoning.v5:'
 
 function newDirectionId(): string {
   return `dir_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`
@@ -82,14 +83,36 @@ function isR(v: unknown): v is IntrinsicCoordinate {
 
 function isClosure(v: unknown): v is DialogueClosure {
   if (!isRecord(v)) return false
-  return (
-    typeof v.key === 'string' &&
-    isR(v.R) &&
-    typeof v.excerpt === 'string' &&
-    Array.isArray(v.directions) &&
-    typeof v.createdAt === 'number' &&
-    typeof v.updatedAt === 'number'
-  )
+  if (
+    typeof v.key !== 'string' ||
+    !isR(v.R) ||
+    typeof v.excerpt !== 'string' ||
+    !Array.isArray(v.directions) ||
+    typeof v.createdAt !== 'number' ||
+    typeof v.updatedAt !== 'number'
+  ) {
+    return false
+  }
+  // memberKeys optional on disk → normalize later
+  return true
+}
+
+function normalizeClosure(raw: {
+  key: string
+  R: IntrinsicCoordinate
+  excerpt: string
+  directions: DirectionRecord[]
+  createdAt: number
+  updatedAt: number
+  memberKeys?: string[]
+}): DialogueClosure {
+  const memberKeys =
+    Array.isArray(raw.memberKeys) && raw.memberKeys.length > 0
+      ? raw.memberKeys.filter((k) => typeof k === 'string')
+      : raw.R.memberKeys && raw.R.memberKeys.length > 0
+        ? raw.R.memberKeys
+        : [raw.key]
+  return { ...raw, memberKeys }
 }
 
 function loadMap(corpus: string): Record<string, DialogueClosure> {
@@ -100,7 +123,7 @@ function loadMap(corpus: string): Record<string, DialogueClosure> {
     if (!isRecord(parsed)) return {}
     const out: Record<string, DialogueClosure> = {}
     for (const [k, val] of Object.entries(parsed)) {
-      if (isClosure(val)) out[k] = val
+      if (isClosure(val)) out[k] = normalizeClosure(val)
     }
     return out
   } catch {
@@ -149,6 +172,11 @@ interface ReasoningState {
   lastConclusion: string | null
   lastPath: string | null
   error: string | null
+  /**
+   * Set when user adds a direction to the forbid list from the audit dock —
+   * Pilot should run 留房推理 once (does not clear closures / storage).
+   */
+  pendingInferStay: boolean
 
   setCorpus: (corpus: string) => void
   activateResolved: (input: {
@@ -159,10 +187,13 @@ interface ReasoningState {
   pickCandidate: (key: string) => void
   clearActive: () => void
   ensureClosure: (R: IntrinsicCoordinate, excerpt: string) => DialogueClosure
+  findClosuresBySlotKey: (slotKey: string) => DialogueClosure[]
   runLocalMatch: (question: string) => MatchHit[]
   chooseReuse: (directionId: string) => void
   hangVariantOn: (directionId: string, question: string) => void
   toggleForbid: (directionId: string) => void
+  consumePendingInferStay: () => boolean
+  previewLeaveCandidate: (chosen: CircleCandidate) => void
   beginLeave: () => void
   cancelLeave: () => void
   confirmLeaveToResolved: (
@@ -202,6 +233,7 @@ export const useReasoning = create<ReasoningState>((set, get) => ({
   lastConclusion: null,
   lastPath: null,
   error: null,
+  pendingInferStay: false,
 
   setCorpus: (corpus) => {
     set({
@@ -222,12 +254,15 @@ export const useReasoning = create<ReasoningState>((set, get) => ({
   },
 
   pushLog: (line) =>
-    set((s) => ({
-      lastLog: [
-        `${Date.now()}|${new Date().toLocaleTimeString()} ${line}`,
-        ...s.lastLog,
-      ].slice(0, 40),
-    })),
+    set((s) => {
+      const seq = (s.lastLog.length > 0 ? s.lastLog.length : 0) + Date.now()
+      return {
+        lastLog: [
+          `${seq}-${s.lastLog.length}|${new Date().toLocaleTimeString()} ${line}`,
+          ...s.lastLog,
+        ].slice(0, 40),
+      }
+    }),
 
   setError: (msg) => set({ error: msg }),
   setPhase: (p) => set({ phase: p }),
@@ -238,10 +273,13 @@ export const useReasoning = create<ReasoningState>((set, get) => ({
     const { corpus, closures } = get()
     const existing = closures[R.key]
     if (existing) return existing
+    const memberKeys =
+      R.memberKeys && R.memberKeys.length > 0 ? R.memberKeys : [R.key]
     const created: DialogueClosure = {
       key: R.key,
       R,
       excerpt,
+      memberKeys,
       directions: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -250,6 +288,14 @@ export const useReasoning = create<ReasoningState>((set, get) => ({
     saveMap(corpus, next)
     set({ closures: next })
     return created
+  },
+
+  /** 相似命中 slot 哈希后，精确查含该成员的历史对话闭包 */
+  findClosuresBySlotKey: (slotKey: string): DialogueClosure[] => {
+    const { closures } = get()
+    return Object.values(closures).filter(
+      (c) => c.key === slotKey || c.memberKeys.includes(slotKey),
+    )
   },
 
   activateResolved: ({ chosen, candidates }) => {
@@ -402,11 +448,34 @@ export const useReasoning = create<ReasoningState>((set, get) => ({
   },
 
   toggleForbid: (directionId) => {
-    set((s) => ({
-      forbidIds: s.forbidIds.includes(directionId)
-        ? s.forbidIds.filter((id) => id !== directionId)
-        : [...s.forbidIds, directionId],
-    }))
+    const { forbidIds } = get()
+    const adding = !forbidIds.includes(directionId)
+    set({
+      forbidIds: adding
+        ? [...forbidIds, directionId]
+        : forbidIds.filter((id) => id !== directionId),
+      // 加入排除 → 请求一次留房推理（带负面清单）；取消排除不触发
+      pendingInferStay: adding ? true : get().pendingInferStay,
+    })
+    if (adding) {
+      get().pushLog(`已排除方向 · 进入留房推理（带负面清单）· ${directionId}`)
+    }
+  },
+
+  consumePendingInferStay: () => {
+    if (!get().pendingInferStay) return false
+    set({ pendingInferStay: false })
+    return true
+  },
+
+  previewLeaveCandidate: (chosen) => {
+    if (get().phase !== 'leave_pick_target') return
+    set({
+      activeExcerpt: chosen.excerpt,
+      lockBoxes: chosen.boxes,
+      error: null,
+    })
+    get().pushLog(`B1 预览再入对象 · ${chosen.R.key}`)
   },
 
   beginLeave: () => {

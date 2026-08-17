@@ -8,7 +8,8 @@ import type { AChunkSource, PlaceFaces, PlaceKind } from './types'
 import { textToProbe } from './lexicalProbe'
 import { facesToReadout } from './intrinsicKey'
 
-const STORAGE_PREFIX = 'docuverse.a1.v1:'
+/** v2: slot doorplate key* (doc|slot|p|k) + slotK on atoms */
+const STORAGE_PREFIX = 'docuverse.a1.v2:'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null
@@ -121,20 +122,42 @@ export function loadBookIndex(docId: string): BookIndex | null {
         Number(item.bbox[2]),
         Number(item.bbox[3]),
       ]
+      let inkBoxes: Array<[number, number, number, number]> | undefined
+      if (Array.isArray(item.inkBoxes)) {
+        inkBoxes = []
+        for (const raw of item.inkBoxes) {
+          if (!Array.isArray(raw) || raw.length !== 4) continue
+          inkBoxes.push([
+            Number(raw[0]),
+            Number(raw[1]),
+            Number(raw[2]),
+            Number(raw[3]),
+          ])
+        }
+        if (inkBoxes.length === 0) inkBoxes = undefined
+      }
       const faces = item.faces
       const vBook = Array.isArray(item.vBook)
         ? item.vBook.map((x) => Number(x))
         : textToProbe(facesToReadout(faces))
+      const slotK =
+        typeof item.slotK === 'number'
+          ? item.slotK
+          : typeof item.ord === 'number'
+            ? item.ord
+            : 0
       chunks.push({
         ord: item.ord,
         id: item.id,
         page: item.page,
         bbox,
+        inkBoxes,
         start: item.start,
         end: item.end,
         source: item.source,
         kind: item.kind,
         key: item.key,
+        slotK,
         faces,
         content: item.content,
         figId: typeof item.figId === 'string' ? item.figId : undefined,

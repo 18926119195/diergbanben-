@@ -9,28 +9,44 @@ import type { OcrPageResult } from '../data/ocrService'
 import type { PageDocument, PageTextChunk } from '../zigzag/types'
 import {
   facesToReadout,
-  makeFigKey,
-  makeIntrinsicKey,
+  makeComboKey,
+  makeSlotKey,
 } from './intrinsicKey'
 import { cosine, textToProbe } from './lexicalProbe'
 import { embedOne, embedTexts } from './embedClient'
+import {
+  atomSearchText,
+  hybridRank,
+  isRetrievableAtom,
+  scoreGapAllowsAutoLock,
+} from './hybridRetrieve'
+import { expandQueryForRetrieval } from './queryExpand'
+import { fullSlotMember } from './ocrSlot'
+import { structureChunkBlocks } from './structureChunk'
 import type {
   AChunkSource,
   IntrinsicCoordinate,
   PlaceFaces,
   PlaceKind,
 } from './types'
+import type { SlotMemberRef } from './ocrSlot'
 
 export interface AChunk {
   ord: number
   id: string
   page: number
+  /** Registered AABB at emission — restore geometry (page_norm 0–1000). */
   bbox: [number, number, number, number]
+  /** Constituent boxes when structure-merged; highlight may use these. */
+  inkBoxes?: Array<[number, number, number, number]>
   start: number
   end: number
   source: AChunkSource
   kind: PlaceKind
+  /** Doorplate key* = makeSlotKey(doc, page, slotK) */
   key: string
+  /** Page-local OCR / layout step index k */
+  slotK: number
   faces: PlaceFaces
   content: string
   figId?: string
@@ -147,27 +163,42 @@ function splitOcrBlocks(ocr: OcrPageResult): {
   return { text, figs }
 }
 
+type TextAtomChunk = PageTextChunk & {
+  inkBoxes?: Array<[number, number, number, number]>
+}
+
 type PageAtoms =
   | {
       mode: 'dual'
       source: AChunkSource
-      text: PageTextChunk[]
+      text: TextAtomChunk[]
       /** layout figs not yet merged into text */
       figs: Array<PageTextChunk & { label?: string }>
     }
   | { mode: 'fig_only'; figs: Array<PageTextChunk & { label?: string }> }
   | null
 
+/**
+ * Emit layout units with registered AABB only — no text→bbox rebind.
+ * Structure merge creates new units (union + inkBoxes); geom never rematched from T.
+ */
 function pageAtoms(
   page: PageDocument,
   ocr: OcrPageResult | undefined,
 ): PageAtoms {
   const hasPageImage = Boolean(page.imageUrl)
+  const strand = page.strandIndex
 
   if (ocr && ocr.blocks.length > 0) {
     const { text, figs } = splitOcrBlocks(ocr)
     if (text.length > 0 || figs.length > 0) {
-      return { mode: 'dual', source: 'ocr', text, figs }
+      // Cut-bound OCR slots: 1 block = 1 slot. Do NOT structureChunk (would break cut↔T).
+      return {
+        mode: 'dual',
+        source: 'ocr',
+        text,
+        figs,
+      }
     }
   }
 
@@ -178,9 +209,16 @@ function pageAtoms(
       id: c.id,
       content: c.content.trim(),
       bbox: c.bbox,
+      inkBoxes: c.inkBoxes,
     }))
     if (text.length > 0) {
-      return { mode: 'dual', source: 'pdf_text', text, figs: [] }
+      // PDF glyph boxes are already cut-bound by the extractor; keep 1:1.
+      return {
+        mode: 'dual',
+        source: 'pdf_text',
+        text,
+        figs: [],
+      }
     }
   }
 
@@ -199,7 +237,8 @@ function pageAtoms(
     }
   }
 
-  const derived = paragraphsAsChunks(page)
+  const weak = paragraphsAsChunks(page)
+  const derived = structureChunkBlocks(weak)
   if (derived.length === 0) return null
   return { mode: 'dual', source: 'page_text', text: derived, figs: [] }
 }
@@ -243,14 +282,21 @@ function mergeFigsIntoText(
 }
 
 function probeForFaces(faces: PlaceFaces): number[] {
-  return textToProbe(facesToReadout(faces))
+  return textToProbe(
+    atomSearchText({
+      kind: faces.text ? 'text' : 'fig',
+      content: faces.text?.content ?? '',
+      faces,
+    }),
+  )
 }
 
 function pushTextAtom(
   docId: string,
   state: { stream: string; chunks: AChunk[]; ord: number },
   page: number,
-  atom: PageTextChunk,
+  slotK: number,
+  atom: TextAtomChunk,
   source: AChunkSource,
   pageImageUrl: string | undefined,
   layoutFigId: string | undefined,
@@ -259,7 +305,7 @@ function pushTextAtom(
   const start = state.stream.length
   state.stream += atom.content
   const end = state.stream.length
-  const key = makeIntrinsicKey(docId, start, end)
+  const key = makeSlotKey(docId, page, slotK)
   const faces: PlaceFaces = {
     text: { start, end, content: atom.content },
   }
@@ -269,21 +315,27 @@ function pushTextAtom(
     faces.fig = {
       figId,
       note: layoutFigId
-        ? `与文字同区的版面 figure（防 OCR 漂移审计）。页=${page}`
-        : `与文字脸同框的页图像裁剪区。页=${page}`,
+        ? `与文字同区的版面 figure（防 OCR 漂移审计）。页=${page} · k=${slotK}`
+        : `与文字脸同框的页图像裁剪区。页=${page} · k=${slotK}`,
       imageRef: pageImageUrl,
     }
   }
+  const inkBoxes =
+    atom.inkBoxes && atom.inkBoxes.length > 0
+      ? atom.inkBoxes
+      : undefined
   state.chunks.push({
     ord: state.ord,
     id: atom.id,
     page,
     bbox: atom.bbox,
+    inkBoxes,
     start,
     end,
     source,
     kind: 'text',
     key,
+    slotK,
     faces,
     content: atom.content,
     figId: faces.fig?.figId,
@@ -296,6 +348,7 @@ function pushFigAtom(
   docId: string,
   state: { stream: string; chunks: AChunk[]; ord: number },
   page: number,
+  slotK: number,
   fig: PageTextChunk & { label?: string },
   pageImageUrl: string | undefined,
   pageTitle: string,
@@ -312,8 +365,8 @@ function pushFigAtom(
   // Page-specific note so V_book differs across full-page figs (lexical probe stand-in).
   // Real semantic retrieval still needs OCR/caption or a true embedding API.
   const note = caption
-    ? `图脸 · 页${page} · ${titleBit} · ${fig.label ?? 'figure'} · ${caption}`
-    : `图脸 · 页${page} · ${titleBit} · ${figId} · 无文字层/未OCR；仅全页图像锚点。请依据可见版面回答；勿编造未提供的文字。`
+    ? `图脸 · 页${page} · k${slotK} · ${titleBit} · ${fig.label ?? 'figure'} · ${caption}`
+    : `图脸 · 页${page} · k${slotK} · ${titleBit} · ${figId} · 无文字层/未OCR；仅全页图像锚点。请依据可见版面回答；勿编造未提供的文字。`
   const placeholder = caption
     ? `[FIG:${figId}] ${caption}`
     : `[FIG:${figId}] ${titleBit}`
@@ -321,7 +374,8 @@ function pushFigAtom(
   const start = state.stream.length
   state.stream += placeholder
   const end = state.stream.length
-  const key = makeFigKey(docId, figId)
+  // Slot doorplate is primary; keep fig alias on faces for audit
+  const key = makeSlotKey(docId, page, slotK)
   const faces: PlaceFaces = {
     fig: {
       figId,
@@ -342,6 +396,7 @@ function pushFigAtom(
     source: 'layout_fig',
     kind: 'fig',
     key,
+    slotK,
     faces,
     content: placeholder,
     figId,
@@ -365,6 +420,7 @@ export function buildBookIndex(input: {
     const pageImageUrl = page.imageUrl
     const atoms = pageAtoms(page, input.ocrByStrand[page.strandIndex])
     if (!atoms) continue
+    let pageK = 0
 
     if (atoms.mode === 'fig_only') {
       for (const fig of atoms.figs) {
@@ -372,10 +428,12 @@ export function buildBookIndex(input: {
           input.docId,
           state,
           page.strandIndex,
+          pageK,
           fig,
           pageImageUrl,
           page.title,
         )
+        pageK += 1
       }
       continue
     }
@@ -386,21 +444,25 @@ export function buildBookIndex(input: {
         input.docId,
         state,
         page.strandIndex,
+        pageK,
         atom,
         atoms.source,
         pageImageUrl,
         textFigIds.get(atom.id),
       )
+      pageK += 1
     }
     for (const fig of orphanFigs) {
       pushFigAtom(
         input.docId,
         state,
         page.strandIndex,
+        pageK,
         fig,
         pageImageUrl,
         page.title,
       )
+      pageK += 1
     }
   }
 
@@ -462,7 +524,10 @@ export interface CircleCandidate {
   excerpt: string
   score: number
   chunkIds: string[]
+  /** Restore boxes = registered slot AABB(s); never text-rematched. */
   boxes: Array<{ page: number; bbox: [number, number, number, number] }>
+  /** Preselect / circle members with read-range pct for audit旁注 */
+  members: SlotMemberRef[]
 }
 
 export type CircleResolveResult =
@@ -487,36 +552,53 @@ function atomToCandidate(
   const last = run[run.length - 1]
   const score = run.reduce((s, c) => s + c.score, 0)
 
-  if (first.kind === 'fig' || !first.faces.text) {
+  const members: SlotMemberRef[] = run.map((c) =>
+    fullSlotMember({
+      slotId: c.key,
+      page: c.page,
+      bbox: c.bbox,
+    }),
+  )
+  const memberKeys = members.map((m) => m.slotId)
+
+  const boxes = run.flatMap((c) =>
+    c.inkBoxes && c.inkBoxes.length > 0
+      ? c.inkBoxes.map((bbox) => ({ page: c.page, bbox }))
+      : [{ page: c.page, bbox: c.bbox }],
+  )
+
+  if (run.length === 1) {
     const faces = first.faces
     return {
       R: {
         docId,
-        kind: 'fig',
+        kind: first.kind,
         key: first.key,
         start: first.start,
         end: first.end,
         figId: first.figId,
         page: first.page,
+        slotK: first.slotK,
+        memberKeys,
+        members,
         emphasisId,
-        chunkIds: run.map((c) => c.id),
+        chunkIds: [first.id],
         source: first.source,
         faces,
       },
       excerpt: facesToReadout(faces),
       score,
-      chunkIds: run.map((c) => c.id),
-      boxes: run.map((c) => ({ page: c.page, bbox: c.bbox })),
+      chunkIds: [first.id],
+      boxes,
+      members,
     }
   }
 
-  // B-side only: merge contiguous text run into a span key* (not written back to A1)
-  const start = first.start
-  const end = last.end
-  const key = makeIntrinsicKey(docId, start, end)
+  // Cross-slot combo (circle contiguous run / preselect merge) — B-side only
+  const key = makeComboKey(docId, memberKeys)
   const content = run.map((c) => c.faces.text?.content ?? c.content).join('\n\n')
   const faces: PlaceFaces = {
-    text: { start, end, content },
+    text: { start: first.start, end: last.end, content },
   }
   if (first.faces.fig) {
     faces.fig = first.faces.fig
@@ -525,24 +607,34 @@ function atomToCandidate(
     if (withFig?.faces.fig) faces.fig = withFig.faces.fig
   }
 
+  const pctNotes = members
+    .map(
+      (m) =>
+        `${m.slotId.split('|').slice(-2).join('|')}:${m.pctStart.toFixed(0)}%–${m.pctEnd.toFixed(0)}%`,
+    )
+    .join(' · ')
+
   return {
     R: {
       docId,
-      kind: 'text',
+      kind: first.kind === 'fig' && run.every((c) => c.kind === 'fig') ? 'fig' : 'text',
       key,
-      start,
-      end,
+      start: first.start,
+      end: last.end,
       figId: faces.fig?.figId,
       page: first.page,
+      memberKeys,
+      members,
       emphasisId,
       chunkIds: run.map((c) => c.id),
       source: first.source,
       faces,
     },
-    excerpt: facesToReadout(faces),
+    excerpt: `【跨槽组合 ${members.length} · ${pctNotes}】\n${facesToReadout(faces)}`,
     score,
     chunkIds: run.map((c) => c.id),
-    boxes: run.map((c) => ({ page: c.page, bbox: c.bbox })),
+    boxes,
+    members,
   }
 }
 
@@ -614,46 +706,107 @@ export function resolveCircleToR(
 }
 
 /**
- * B-side object anchoring: V_q × A-side V_book → Top-K exact key* candidates.
- * Uses 审计 Embedding API when configured; else lexical probe.
+ * B-side object anchoring: hybrid BM25 + dense cosine over A1 atoms.
+ * Returns Top-K exact key* candidates; autoLockOk only when score gap is clear.
  */
 export async function resolveVqToCandidates(
   index: BookIndex,
   question: string,
-  topK = 5,
+  topK = 8,
 ): Promise<{
   candidates: CircleCandidate[]
   weakFigOnly: boolean
   usedEmbedApi: boolean
+  autoLockOk: boolean
+  poolSize: number
+  expandNote: string
+  searchQuery: string
 }> {
   const q = question.trim()
   if (!q || index.chunks.length === 0) {
-    return { candidates: [], weakFigOnly: false, usedEmbedApi: false }
+    return {
+      candidates: [],
+      weakFigOnly: false,
+      usedEmbedApi: false,
+      autoLockOk: false,
+      poolSize: 0,
+      expandNote: '',
+      searchQuery: q,
+    }
   }
   const weakFigOnly =
     index.chunks.length > 0 && index.chunks.every((c) => c.kind === 'fig')
-  const { vector: vq, usedApi } = await embedOne(q)
-  const scored = index.chunks.map((chunk) => {
-    const score = cosine(vq, chunk.vBook)
-    return { chunk, score }
+
+  const pool = index.chunks
+    .map((chunk, indexInBook) => ({ chunk, indexInBook }))
+    .filter(({ chunk }) => isRetrievableAtom(chunk))
+
+  if (pool.length === 0) {
+    return {
+      candidates: [],
+      weakFigOnly,
+      usedEmbedApi: false,
+      autoLockOk: false,
+      poolSize: 0,
+      expandNote: '',
+      searchQuery: q,
+    }
+  }
+
+  const expanded = await expandQueryForRetrieval(q)
+  const retrievalQ = expanded.searchQuery
+
+  const { vector: vq, usedApi } = await embedOne(retrievalQ)
+  const denseScores = pool.map(({ chunk }) => {
+    if (chunk.vBook.length !== vq.length) return 0
+    return cosine(vq, chunk.vBook)
   })
-  scored.sort((a, b) => b.score - a.score)
-  const candidates = scored.slice(0, topK).map(({ chunk, score }) =>
-    atomToCandidate(
+  const docTexts = pool.map(({ chunk }) => atomSearchText(chunk))
+  const ranked = hybridRank({
+    denseScores,
+    docTexts,
+    query: retrievalQ,
+    denseWeight: 0.55,
+    topK: Math.min(topK, pool.length),
+  })
+
+  const candidates = ranked.map((hit) => {
+    const { chunk } = pool[hit.index]
+    const c = atomToCandidate(
       index.docId,
-      [{ ...chunk, score: Math.max(0.01, score) }],
+      [{ ...chunk, score: Math.max(0.01, hit.fused) }],
       'vq_anchor',
-    ),
+    )
+    const expandTag = expanded.skipped
+      ? ''
+      : ` expand=${expanded.terms.slice(0, 4).join(' · ')}`
+    c.excerpt = `【槽 ${chunk.key} · p${chunk.page} k${chunk.slotK} · fused=${hit.fused.toFixed(3)} dense=${hit.dense.toFixed(3)} bm25=${hit.sparse.toFixed(3)}${expandTag}】\n读值范围 ${c.members.map((m) => `${m.pctStart.toFixed(0)}%–${m.pctEnd.toFixed(0)}%`).join(' · ')}\n${c.excerpt}`
+    return c
+  })
+
+  const autoLockOk = scoreGapAllowsAutoLock(
+    ranked.map((h) => h.fused),
+    0.08,
+    0.35,
   )
-  return { candidates, weakFigOnly, usedEmbedApi: usedApi }
+
+  return {
+    candidates,
+    weakFigOnly,
+    usedEmbedApi: usedApi,
+    autoLockOk,
+    poolSize: pool.length,
+    expandNote: expanded.note,
+    searchQuery: retrievalQ,
+  }
 }
 
-/** Recompute V_book with 审计 Embedding (or probe). Mutates and returns index. */
+/** Recompute V_book from search text (正文优先), not full dual-face readout. */
 export async function reembedBookIndex(index: BookIndex): Promise<{
   index: BookIndex
   usedApi: boolean
 }> {
-  const texts = index.chunks.map((c) => facesToReadout(c.faces))
+  const texts = index.chunks.map((c) => atomSearchText(c))
   const { vectors, usedApi } = await embedTexts(texts)
   const chunks = index.chunks.map((c, i) => ({
     ...c,

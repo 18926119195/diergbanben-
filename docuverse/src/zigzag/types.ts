@@ -77,6 +77,8 @@ export interface PageTextChunk {
   id: string
   content: string
   bbox: [number, number, number, number]
+  /** Constituent layout boxes when this chunk was merged (optional). */
+  inkBoxes?: Array<[number, number, number, number]>
 }
 
 export interface PageDocument {

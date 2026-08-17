@@ -20,6 +20,8 @@ import {
   resolveVqToCandidates,
 } from '../reasoning/pipelineA'
 import type { BookIndex, CircleCandidate } from '../reasoning/pipelineA'
+import { refineCandidateBoxesAsync } from '../reasoning/inkHighlight'
+import { exportPageSlotDataset } from '../reasoning/slotDatasetExport'
 import type { LinkType } from '../reasoning/types'
 
 const LEAVE_LINK_OPTIONS: Array<{ id: LinkType; label: string }> = [
@@ -46,6 +48,7 @@ export function ReasoningPilotPanel() {
   const indexReady = useIndexGate((s) => s.ready)
   const indexPhase = useIndexGate((s) => s.phase)
   const indexMessage = useIndexGate((s) => s.message)
+  const finalizeIndex = useIndexGate((s) => s.finalizeIndex)
   const setGatedBookIndex = useIndexGate((s) => s.setBookIndex)
 
   const setCorpus = useReasoning((s) => s.setCorpus)
@@ -60,21 +63,19 @@ export function ReasoningPilotPanel() {
   const lockError = useReasoning((s) => s.lockError)
   const closures = useReasoning((s) => s.closures)
   const phase = useReasoning((s) => s.phase)
-  const lastMatches = useReasoning((s) => s.lastMatches)
   const pendingQuestion = useReasoning((s) => s.pendingQuestion)
   const setPendingQuestion = useReasoning((s) => s.setPendingQuestion)
   const runLocalMatch = useReasoning((s) => s.runLocalMatch)
-  const chooseReuse = useReasoning((s) => s.chooseReuse)
-  const toggleForbid = useReasoning((s) => s.toggleForbid)
   const forbidIds = useReasoning((s) => s.forbidIds)
-  const beginLeave = useReasoning((s) => s.beginLeave)
+  const pendingInferStay = useReasoning((s) => s.pendingInferStay)
+  const consumePendingInferStay = useReasoning((s) => s.consumePendingInferStay)
+  const leaveFromKey = useReasoning((s) => s.leaveFromKey)
+  const previewLeaveCandidate = useReasoning((s) => s.previewLeaveCandidate)
   const cancelLeave = useReasoning((s) => s.cancelLeave)
   const confirmLeaveToResolved = useReasoning((s) => s.confirmLeaveToResolved)
   const rememberInferResult = useReasoning((s) => s.rememberInferResult)
   const pushLog = useReasoning((s) => s.pushLog)
   const lastLog = useReasoning((s) => s.lastLog)
-  const lastConclusion = useReasoning((s) => s.lastConclusion)
-  const lastPath = useReasoning((s) => s.lastPath)
   const lastBundle = useReasoning((s) => s.lastBundle)
   const error = useReasoning((s) => s.error)
   const setError = useReasoning((s) => s.setError)
@@ -166,12 +167,91 @@ export function ReasoningPilotPanel() {
     }
   }
 
-  const focusCandidate = (c: CircleCandidate, list: CircleCandidate[]) => {
-    activateResolved({ chosen: c, candidates: list })
-    if (c.R.page !== currentStrand) {
-      swoopToPage(c.R.page)
+  const onExportSlotDataset = () => {
+    const n = exportPageSlotDataset({
+      experimentId: `EXP-SLOT-01_${uploadLabel || docId}`,
+      docId,
+      page: currentStrand,
+      ocr: ocrByStrand[currentStrand],
+      bookIndex,
+      pageTitle: pages[currentStrand]?.title,
+    })
+    pushLog(
+      n > 0
+        ? `已导出本页槽标注包 ×${n}（填 geom_ok / t_ok）`
+        : '本页无槽可导出：请先切割 OCR 或重建 A1',
+    )
+  }
+
+  const onRebuildStructuredIndex = async () => {
+    setEmbedBusy(true)
+    setError(null)
+    try {
+      const index = await finalizeIndex({ docId, pages, ocrByStrand })
+      pushLog(
+        `重建 A1（切割槽 1:1）· ${index.chunks.length} 原子 · 已重新 Embedding`,
+      )
+      setVqCandidates([])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setEmbedBusy(false)
     }
-    pushLog(`定位锁 · p${c.R.page} · ${c.R.key}`)
+  }
+
+  const findClosuresBySlotKey = useReasoning((s) => s.findClosuresBySlotKey)
+
+  const focusCandidate = (c: CircleCandidate, list: CircleCandidate[]) => {
+    void (async () => {
+      const text = c.R.faces.text?.content?.trim() ?? ''
+      const pageDoc = pages.find((p) => p.strandIndex === c.R.page)
+      let refinedBoxes = c.boxes
+      let inkNote = '跳过'
+      if (c.boxes.length > 0) {
+        const refined = await refineCandidateBoxesAsync({
+          text,
+          page: c.R.page,
+          fallback: c.boxes,
+          pageChunks: pageDoc?.textChunks,
+          ocrBlocks: ocrByStrand[c.R.page]?.blocks,
+          imageUrl: pageDoc?.imageUrl,
+        })
+        refinedBoxes = refined.boxes
+        inkNote = `${refined.method} · ${refined.note}`
+      }
+      const chosen = { ...c, boxes: refinedBoxes }
+      const refinedList = list.map((item) =>
+        item.R.key === c.R.key ? chosen : item,
+      )
+
+      // B1 再入：只预览，确认后再进房（不改闭包存储）
+      if (useReasoning.getState().phase === 'leave_pick_target') {
+        setVqCandidates(refinedList)
+        setLeavePickKey(chosen.R.key)
+        previewLeaveCandidate(chosen)
+        if (c.R.page !== currentStrand) swoopToPage(c.R.page)
+        pushLog(
+          `B1 候选预览 · p${c.R.page} · ${c.R.key} · 墨迹 ${refinedBoxes.length} · ${inkNote}`,
+        )
+        setError(null)
+        return
+      }
+
+      activateResolved({ chosen, candidates: refinedList })
+      if (c.R.page !== currentStrand) {
+        swoopToPage(c.R.page)
+      }
+      const hist = [
+        ...new Set(
+          (c.members.length > 0 ? c.members.map((m) => m.slotId) : [c.R.key])
+            .flatMap((id) => findClosuresBySlotKey(id).map((cl) => cl.key)),
+        ),
+      ]
+      pushLog(
+        `定位锁 · p${c.R.page} · ${c.R.key} · 墨迹 ${refinedBoxes.length} · ${inkNote}` +
+          (hist.length ? ` · 历史闭包 ${hist.length}` : ''),
+      )
+    })()
   }
 
   const selectedEdge = selectedEmphasisId
@@ -192,29 +272,46 @@ export function ReasoningPilotPanel() {
       return
     }
     setVqCandidates([])
-    activateResolved({
-      chosen: resolved.chosen,
-      candidates: resolved.candidates,
-    })
+    const pageDoc = pages.find((p) => p.strandIndex === resolved.chosen.R.page)
+    const text = resolved.chosen.R.faces.text?.content?.trim() ?? ''
+    void (async () => {
+      let boxes = resolved.chosen.boxes
+      const refined = await refineCandidateBoxesAsync({
+        text,
+        page: resolved.chosen.R.page,
+        fallback: resolved.chosen.boxes,
+        pageChunks: pageDoc?.textChunks,
+        ocrBlocks: ocrByStrand[resolved.chosen.R.page]?.blocks,
+        imageUrl: pageDoc?.imageUrl,
+      })
+      boxes = refined.boxes
+      pushLog(
+        `圈定墨迹 · ${refined.method} · ${refined.note} · ×${boxes.length}`,
+      )
+      const chosen = { ...resolved.chosen, boxes }
+      activateResolved({
+        chosen,
+        candidates: resolved.candidates.map((c) =>
+          c.R.key === chosen.R.key ? chosen : c,
+        ),
+      })
+    })()
   }, [
     selectedEmphasisId,
     emphasisEdges,
     bookIndex,
+    pages,
+    ocrByStrand,
     activateResolved,
     setLockFailure,
     clearActive,
+    pushLog,
   ])
 
   const leaveResolved = useMemo(() => {
     if (phase !== 'leave_pick_target' || !selectedEdge) return null
     return resolveCircleToR(selectedEdge, bookIndex)
   }, [phase, selectedEdge, bookIndex])
-
-  const leaveChosen =
-    leaveResolved && leaveResolved.ok
-      ? (leaveResolved.candidates.find((c) => c.R.key === leavePickKey) ??
-        leaveResolved.chosen)
-      : null
 
   const canAskVq =
     indexReady ||
@@ -223,6 +320,77 @@ export function ReasoningPilotPanel() {
       indexPhase !== 'ocr' &&
       indexPhase !== 'embedding' &&
       indexPhase !== 'importing')
+
+  const leaveExcludeKey = leaveFromKey ?? activeKey
+
+  /** B1 候选池：V_q 列表优先，否则圈定解析；始终去掉当前房对象 */
+  const leavePool = useMemo(() => {
+    if (phase !== 'leave_pick_target') return [] as CircleCandidate[]
+    const fromVq = vqCandidates.filter((c) => c.R.key !== leaveExcludeKey)
+    if (fromVq.length > 0) return fromVq
+    if (leaveResolved && leaveResolved.ok) {
+      return leaveResolved.candidates.filter((c) => c.R.key !== leaveExcludeKey)
+    }
+    return []
+  }, [phase, vqCandidates, leaveResolved, leaveExcludeKey])
+
+  const leaveChosen =
+    leavePool.find((c) => c.R.key === leavePickKey) ??
+    (leaveResolved && leaveResolved.ok
+      ? leaveResolved.candidates.find((c) => c.R.key === leavePickKey) ??
+        (leaveResolved.chosen.R.key !== leaveExcludeKey
+          ? leaveResolved.chosen
+          : null)
+      : null) ??
+    leavePool[0] ??
+    null
+
+  const fetchLeaveCandidates = async () => {
+    if (!canAskVq) {
+      setError('索引未就绪：无法拉取再入候选，请用 H 笔圈新区域')
+      return
+    }
+    const q =
+      pendingQuestion.trim() ||
+      activeExcerpt.trim().slice(0, 160) ||
+      ''
+    if (!q) {
+      setError('请先在提问框留下问题（或当前房有读值），再拉取再入候选')
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      const { candidates: cands, poolSize, usedEmbedApi, expandNote } =
+        await resolveVqToCandidates(bookIndex, q, 10)
+      const filtered = cands.filter((c) => c.R.key !== leaveExcludeKey)
+      setVqCandidates(filtered)
+      setLeavePickKey(filtered[0]?.R.key ?? null)
+      if (filtered[0]) previewLeaveCandidate(filtered[0])
+      const expandBit = expandNote ? ` · ${expandNote}` : ''
+      pushLog(
+        `B1 再入候选 · 池=${poolSize} · 可用 ${filtered.length}（已排除当前房）· ${
+          usedEmbedApi ? `审计 ${embed.model}` : '假向量'
+        }${expandBit}`,
+      )
+      if (filtered.length === 0) {
+        setError(
+          '没有不同于当前房的检索候选：请换问题，或用 H 笔圈另一处强调。',
+        )
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // 进入退房再入时自动拉候选（不清理闭包）
+  useEffect(() => {
+    if (phase !== 'leave_pick_target') return
+    void fetchLeaveCandidates()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on enter leave mode
+  }, [phase])
 
   const activeClosure = activeKey ? closures[activeKey] : null
   const locked = Boolean(activeR && activeExcerpt.trim())
@@ -251,36 +419,63 @@ export function ReasoningPilotPanel() {
         setError('索引未就绪：请先完成上传流水线（OCR → Embedding）')
         return
       }
-      if (useReasoning.getState().phase === 'leave_pick_target') {
-        setError('退房再入中请用圈定选对象')
-        return
-      }
+      const leaving =
+        useReasoning.getState().phase === 'leave_pick_target'
       setBusy(true)
       try {
-        const { candidates: cands, weakFigOnly, usedEmbedApi } =
-          await resolveVqToCandidates(bookIndex, q, 5)
+        const {
+          candidates: cands,
+          weakFigOnly,
+          usedEmbedApi,
+          autoLockOk,
+          poolSize,
+          expandNote,
+        } = await resolveVqToCandidates(bookIndex, q, leaving ? 10 : 8)
         if (cands.length === 0) {
           setVqCandidates([])
-          setLockFailure('A1 表为空或问题无效，无法 V_q 锚定')
+          setLockFailure('无可检索 A1 原子（池为空）')
+          return
+        }
+        if (leaving) {
+          const exclude = leaveFromKey ?? activeKey
+          const filtered = cands.filter((c) => c.R.key !== exclude)
+          setVqCandidates(filtered)
+          setLeavePickKey(filtered[0]?.R.key ?? null)
+          if (filtered[0]) previewLeaveCandidate(filtered[0])
+          pushLog(
+            `B1 V_q 再入 · 可用 ${filtered.length}/${cands.length} · ${
+              usedEmbedApi ? `审计 ${embed.model}` : '假向量'
+            }`,
+          )
+          setError(
+            filtered.length === 0
+              ? '检索结果都是当前房：请换问法或改用 H 笔圈新对象。'
+              : null,
+          )
           return
         }
         setVqCandidates(cands)
-        focusCandidate(cands[0], cands)
-        pushLog(
-          `V_q 锚定 · Top-${cands.length} · 首选 ${cands[0].R.key} · score=${cands[0].score.toFixed(3)} · ${
-            usedEmbedApi ? `审计API ${embed.model}` : '假向量probe'
-          }${weakFigOnly ? ' · 弱模式：全书仅全页图脸' : ''}`,
-        )
-        if (weakFigOnly) {
-          setError(
-            '本书 A1 仍偏「仅图」。点击下方候选可跳页高亮；要内容检索请确保 OCR 成功。',
+        const expandBit = expandNote ? ` · ${expandNote}` : ''
+        if (autoLockOk) {
+          focusCandidate(cands[0], cands)
+          pushLog(
+            `V_q 混合检索 · 池=${poolSize} · 断崖锁定 ${cands[0].R.key} · fused=${cands[0].score.toFixed(3)} · ${
+              usedEmbedApi ? `审计 ${embed.model}` : '假向量'
+            }${expandBit}`,
           )
-        } else if (!usedEmbedApi) {
-          setError(
-            '审计 Embedding 未配置：当前用假向量排序。请在「模型部署」填写 Embedding 并「重算 V_book」。',
-          )
-        } else {
           setError(null)
+        } else {
+          // Do not auto-enter: user must click a candidate
+          pushLog(
+            `V_q 混合检索 · 池=${poolSize} · Top-${cands.length} 需确认（无断崖）· 首选建议 ${cands[0].R.key} · fused=${cands[0].score.toFixed(3)} · ${
+              usedEmbedApi ? `审计 ${embed.model}` : '假向量'
+            }${expandBit}`,
+          )
+          setError(
+            weakFigOnly
+              ? '检索区分度不足且多为图脸：请点击下方候选确认，或改用圈定。'
+              : '检索无断崖优势：请点击下方候选确认后再进房（已禁用自动 Top-1）。',
+          )
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
@@ -346,6 +541,14 @@ export function ReasoningPilotPanel() {
       setBusy(false)
     }
   }
+
+  // 中央下方「排除方向」→ 自动留房推理（带负面清单）；不清理闭包缓存
+  useEffect(() => {
+    if (!pendingInferStay) return
+    if (!consumePendingInferStay()) return
+    void onInferStay()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only fire on pending flag
+  }, [pendingInferStay])
 
   const onConfirmLeaveTarget = () => {
     if (phase !== 'leave_pick_target') return
@@ -521,12 +724,29 @@ export function ReasoningPilotPanel() {
           >
             {embedBusy ? '重算中…' : '用审计模型重算 V_book'}
           </button>
+          <button
+            type="button"
+            className="upload-btn"
+            onClick={() => void onRebuildStructuredIndex()}
+            disabled={embedBusy || pages.length === 0}
+          >
+            重建 A1 索引
+          </button>
+          <button
+            type="button"
+            className="upload-btn"
+            onClick={onExportSlotDataset}
+            disabled={pages.length === 0}
+          >
+            导出本页槽标注包
+          </button>
         </div>
         <p className="reasoning-muted">
           状态：OCR {modelStatus.ocrReady ? '可用' : '未接'} / 审计{' '}
           {modelStatus.embedReady ? '已接' : '未接'} / 推理{' '}
           {modelStatus.reasonReady ? '已接' : 'Mock'}
           {modelStatus.autoOcrOnUpload ? ' · 上传自动 OCR 开' : ''}
+          · OCR 为切割即登记（1 块=1 槽）；导出 JSON 填 geom_ok / t_ok 采数据集
         </p>
       </section>
 
@@ -608,7 +828,25 @@ export function ReasoningPilotPanel() {
                   }
                   onClick={() => focusCandidate(c, lockCandidates)}
                 >
-                  [{c.R.kind}] {c.R.kind === 'fig' ? c.R.figId : `[${c.R.start},${c.R.end})`} · score={c.score.toFixed(2)}
+                  [{c.R.kind}]{' '}
+                  {c.R.slotK !== undefined
+                    ? `p${c.R.page}·k${c.R.slotK}`
+                    : c.members.length > 1
+                      ? `combo×${c.members.length}`
+                      : c.R.key.slice(-24)}{' '}
+                  · score={c.score.toFixed(2)}
+                  {c.members.length > 0 && (
+                    <span className="reasoning-muted">
+                      {' '}
+                      ·{' '}
+                      {c.members
+                        .map(
+                          (m) =>
+                            `${m.pctStart.toFixed(0)}%–${m.pctEnd.toFixed(0)}%`,
+                        )
+                        .join(' · ')}
+                    </span>
+                  )}
                 </button>
                 <p className="reasoning-muted">{c.excerpt.slice(0, 80)}</p>
               </li>
@@ -634,16 +872,16 @@ export function ReasoningPilotPanel() {
               ? '输入问题 → V_q 锚定 → 点候选跳页高亮…'
               : '索引未就绪，请先完成上传流水线…'
           }
-          disabled={!canAskVq || phase === 'leave_pick_target' || busy}
+          disabled={!canAskVq || busy}
         />
         <div className="reasoning-actions">
           <button
             type="button"
             className="upload-btn"
             onClick={onVqAnchor}
-            disabled={!canAskVq || busy || phase === 'leave_pick_target'}
+            disabled={!canAskVq || busy}
           >
-            V_q 锚定对象
+            {phase === 'leave_pick_target' ? 'V_q 再入候选' : 'V_q 锚定对象'}
           </button>
           <button
             type="button"
@@ -666,9 +904,10 @@ export function ReasoningPilotPanel() {
 
       {vqCandidates.length > 0 && phase !== 'leave_pick_target' && (
         <section className="reasoning-block">
-          <h3>V_q 候选 · 点击跳页高亮</h3>
+          <h3>V_q 预选 · 点选确认槽（返回哈希 + 读值 + AABB）</h3>
           <p className="reasoning-muted">
-            每个候选是一把精确 key*。点击 → 跳到该页并显示绿虚线框（bbox）。
+            预选搜槽内 T，返回 slot 门牌；高亮用排放 AABB；旁注读值
+            start%–end%。点选后可查历史对话闭包。
           </p>
           <ul className="reasoning-list">
             {vqCandidates.map((c) => (
@@ -682,55 +921,16 @@ export function ReasoningPilotPanel() {
                   }
                   onClick={() => focusCandidate(c, vqCandidates)}
                 >
-                  [{c.R.kind}] score={c.score.toFixed(3)} · p{c.R.page} ·{' '}
-                  {c.R.kind === 'fig' ? c.R.figId : `[${c.R.start},${c.R.end})`}
+                  [{c.R.kind}] score={c.score.toFixed(3)} · p{c.R.page}
+                  {c.R.slotK !== undefined ? `·k${c.R.slotK}` : ''} ·{' '}
+                  {c.members
+                    .map((m) => `${m.pctStart.toFixed(0)}–${m.pctEnd.toFixed(0)}%`)
+                    .join(' · ')}
                 </button>
-                <p className="reasoning-muted">{c.excerpt.slice(0, 80)}</p>
+                <p className="reasoning-muted">{c.excerpt.slice(0, 120)}</p>
               </li>
             ))}
           </ul>
-        </section>
-      )}
-
-      {lastMatches.length > 0 && (
-        <section className="reasoning-block">
-          <h3>近似方向 · 审核</h3>
-          <ul className="reasoning-list">
-            {lastMatches.map((m) => (
-              <li key={m.direction.directionId}>
-                <div className="reasoning-hit">
-                  <span className="reasoning-mono">
-                    sim={m.score.toFixed(2)}
-                  </span>
-                  <p>{m.direction.questionText}</p>
-                  <p className="reasoning-muted">
-                    {m.direction.conclusion.slice(0, 100)}
-                  </p>
-                  <div className="reasoning-actions">
-                    <button
-                      type="button"
-                      className="upload-btn"
-                      onClick={() => chooseReuse(m.direction.directionId)}
-                    >
-                      复用（停止）
-                    </button>
-                    <button
-                      type="button"
-                      className="upload-btn"
-                      onClick={() => toggleForbid(m.direction.directionId)}
-                    >
-                      {forbidIds.includes(m.direction.directionId)
-                        ? '已加入排除'
-                        : '排除此方向'}
-                    </button>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-          <button type="button" className="upload-btn" onClick={beginLeave}>
-            不留在该闭包 · 退房
-          </button>
         </section>
       )}
 
@@ -738,34 +938,56 @@ export function ReasoningPilotPanel() {
         <section className="reasoning-block leave">
           <h3>B1 再入 · 选新对象</h3>
           <p className="reasoning-muted">
-            再圈/点选另一强调。新对象必须同样命中 A 原文。partial 禁止自动强继承。
+            下拉只决定「旧结论跟不跟」；请先在下方点选再入候选（已自动排除当前房），或
+            H 笔圈另一处。选好后再确认再入。
           </p>
+          <div className="reasoning-actions">
+            <button
+              type="button"
+              className="upload-btn"
+              onClick={() => void fetchLeaveCandidates()}
+              disabled={busy}
+            >
+              {busy ? '拉取中…' : '重新拉取再入候选'}
+            </button>
+          </div>
           {leaveResolved && !leaveResolved.ok && (
             <p className="reasoning-error">{leaveResolved.message}</p>
           )}
-          {leaveResolved && leaveResolved.ok && leaveResolved.candidates.length > 1 && (
+          {leavePool.length > 0 ? (
             <ul className="reasoning-list">
-              {leaveResolved.candidates.map((c) => (
+              {leavePool.map((c) => (
                 <li key={c.R.key}>
                   <button
                     type="button"
                     className={
-                      (leavePickKey ?? leaveResolved.chosen.R.key) === c.R.key
+                      (leaveChosen?.R.key ?? leavePickKey) === c.R.key
                         ? 'upload-btn reasoning-cand-on'
                         : 'upload-btn'
                     }
-                    onClick={() => setLeavePickKey(c.R.key)}
+                    onClick={() => focusCandidate(c, leavePool)}
                   >
-                    [{c.R.start},{c.R.end}) · {c.excerpt.slice(0, 36)}
+                    [{c.R.slotK !== undefined
+                      ? `p${c.R.page}·k${c.R.slotK}`
+                      : c.R.key.slice(-20)}
+                    ] score={c.score.toFixed(3)} · {c.excerpt.slice(0, 36)}
                   </button>
                 </li>
               ))}
             </ul>
+          ) : (
+            <p className="reasoning-muted">
+              尚无再入候选。点「重新拉取再入候选」，或用 H 笔圈新强调。
+            </p>
           )}
           {leaveChosen && (
             <pre className="reasoning-excerpt">{leaveChosen.excerpt}</pre>
           )}
+          <label className="reasoning-muted" htmlFor="leave-link-type">
+            与旧房的关系（继承方式）
+          </label>
           <select
+            id="leave-link-type"
             className="reasoning-select"
             value={linkType}
             onChange={(e) => {
@@ -785,22 +1007,14 @@ export function ReasoningPilotPanel() {
               type="button"
               className="upload-btn"
               onClick={onConfirmLeaveTarget}
-              disabled={!leaveChosen}
+              disabled={!leaveChosen || busy}
             >
-              确认再入所选强调
+              确认再入所选对象
             </button>
             <button type="button" className="upload-btn" onClick={cancelLeave}>
               取消
             </button>
           </div>
-        </section>
-      )}
-
-      {(lastConclusion || lastPath) && (
-        <section className="reasoning-block">
-          <h3>最近结论</h3>
-          {lastPath && <pre className="reasoning-pre">{lastPath}</pre>}
-          {lastConclusion && <p>{lastConclusion}</p>}
         </section>
       )}
 
@@ -829,11 +1043,10 @@ export function ReasoningPilotPanel() {
       <section className="reasoning-block">
         <h3>日志</h3>
         <ul className="reasoning-log">
-          {lastLog.map((line) => {
+          {lastLog.map((line, i) => {
             const sep = line.indexOf('|')
-            const key = sep > 0 ? line.slice(0, sep) : line
             const text = sep > 0 ? line.slice(sep + 1) : line
-            return <li key={key}>{text}</li>
+            return <li key={`log-${i}`}>{text}</li>
           })}
         </ul>
       </section>
