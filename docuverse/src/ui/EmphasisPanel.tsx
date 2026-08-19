@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useDocuverse } from '../cvs/store'
+import { isPublicDemo } from '../demoMode'
 import {
   buildEmphasisPacket,
   downloadEmphasisPacketJson,
@@ -198,45 +199,49 @@ export function EmphasisPanel() {
             style={{ marginTop: 6 }}
             onClick={() => updateEmphasisReading(selected.id, readingDraft)}
           >
-            保存理解 → 写入工序
+            保存理解{isPublicDemo ? '' : ' → 写入工序'}
           </button>
         </label>
       )}
 
-      <h3 className="bond-subhead">送模数据包</h3>
-      <button
-        type="button"
-        className="corpus-chip"
-        disabled={packetBusy || edges.length === 0}
-        onClick={() => {
-          setPacketBusy(true)
-          void buildEmphasisPacket(edges, links, pages)
-            .then((packet) => {
-              downloadEmphasisPacketJson(packet)
-            })
-            .finally(() => setPacketBusy(false))
-        }}
-      >
-        {packetBusy ? '生成中…' : '导出 catalog JSON'}
-      </button>
+      {!isPublicDemo && (
+        <>
+          <h3 className="bond-subhead">送模数据包</h3>
+          <button
+            type="button"
+            className="corpus-chip"
+            disabled={packetBusy || edges.length === 0}
+            onClick={() => {
+              setPacketBusy(true)
+              void buildEmphasisPacket(edges, links, pages)
+                .then((packet) => {
+                  downloadEmphasisPacketJson(packet)
+                })
+                .finally(() => setPacketBusy(false))
+            }}
+          >
+            {packetBusy ? '生成中…' : '导出 catalog JSON'}
+          </button>
 
-      <h3 className="bond-subhead">
-        工序时间线（近 {Math.min(12, pipelineSteps.length)} 步）
-      </h3>
-      <ol className="pipeline-log">
-        {[...pipelineSteps]
-          .slice(-12)
-          .reverse()
-          .map((s) => (
-            <li key={s.id}>
-              <span className={`pipe-kind ${s.kind}`}>{s.kind}</span>
-              <span className="pipe-actor">{s.actor}</span>
-              <span className="pipe-sum">{s.summary}</span>
-            </li>
-          ))}
-      </ol>
-      {pipelineSteps.length === 0 && (
-        <p className="hint">上传 PDF 或画圈后，转化工序会出现在这里。</p>
+          <h3 className="bond-subhead">
+            工序时间线（近 {Math.min(12, pipelineSteps.length)} 步）
+          </h3>
+          <ol className="pipeline-log">
+            {[...pipelineSteps]
+              .slice(-12)
+              .reverse()
+              .map((s) => (
+                <li key={s.id}>
+                  <span className={`pipe-kind ${s.kind}`}>{s.kind}</span>
+                  <span className="pipe-actor">{s.actor}</span>
+                  <span className="pipe-sum">{s.summary}</span>
+                </li>
+              ))}
+          </ol>
+          {pipelineSteps.length === 0 && (
+            <p className="hint">上传 PDF 或画圈后，转化工序会出现在这里。</p>
+          )}
+        </>
       )}
     </section>
   )

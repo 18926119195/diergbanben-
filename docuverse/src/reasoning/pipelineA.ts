@@ -713,6 +713,7 @@ export async function resolveVqToCandidates(
   index: BookIndex,
   question: string,
   topK = 8,
+  options?: { skipExpand?: boolean },
 ): Promise<{
   candidates: CircleCandidate[]
   weakFigOnly: boolean
@@ -753,7 +754,16 @@ export async function resolveVqToCandidates(
     }
   }
 
-  const expanded = await expandQueryForRetrieval(q)
+  const expanded = options?.skipExpand
+    ? {
+        original: q,
+        searchQuery: q,
+        terms: [],
+        usedApi: false,
+        skipped: true,
+        note: 'skipExpand',
+      }
+    : await expandQueryForRetrieval(q)
   const retrievalQ = expanded.searchQuery
 
   const { vector: vq, usedApi } = await embedOne(retrievalQ)

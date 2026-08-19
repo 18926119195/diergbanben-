@@ -1,6 +1,7 @@
 /**
- * Triple model deployment:
- * OCR → 建文字/图块原子；Embedding → 审计寻址；Chat → 推理.
+ * Triple model deployment (project default stack):
+ * - OCR: 智谱 glm-ocr（本地 Vite / Vercel `/api/zhipu` 代理 + ZHIPU_API_KEY）
+ * - Embed + Chat: 硅基流动同一 Key/Base（推理 DeepSeek-V4-Flash；向量 BAAI/bge-m3）
  * Runtime overrides in localStorage; env = defaults.
  */
 
@@ -21,7 +22,13 @@ export interface DualModelConfig {
   autoOcrOnUpload: boolean
 }
 
-const STORAGE_KEY = 'docuverse.models.v2'
+/** v3: 默认栈改为智谱 OCR + 硅基流动 embed/reason，丢弃旧 OpenAI 本地覆盖 */
+const STORAGE_KEY = 'docuverse.models.v3'
+
+const SILICONFLOW_BASE = 'https://api.siliconflow.cn/v1'
+const DEFAULT_REASON_MODEL = 'deepseek-ai/DeepSeek-V4-Flash'
+/** DeepSeek-V4-Flash 是 Chat；同账号审计向量用硅基流动 embedding 模型 */
+const DEFAULT_EMBED_MODEL = 'Qwen/Qwen3-VL-Embedding-8B'
 
 function env(name: string): string {
   const v = import.meta.env[name]
@@ -34,12 +41,16 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function parseSlot(v: unknown, fallback: ModelSlotConfig): ModelSlotConfig {
   if (!isRecord(v)) return fallback
+  // Empty localStorage fields fall back to env defaults (so .env.local applies).
   return {
     baseUrl:
       typeof v.baseUrl === 'string' && v.baseUrl.trim()
         ? v.baseUrl.trim()
         : fallback.baseUrl,
-    apiKey: typeof v.apiKey === 'string' ? v.apiKey.trim() : fallback.apiKey,
+    apiKey:
+      typeof v.apiKey === 'string' && v.apiKey.trim()
+        ? v.apiKey.trim()
+        : fallback.apiKey,
     model:
       typeof v.model === 'string' && v.model.trim()
         ? v.model.trim()
@@ -48,25 +59,25 @@ function parseSlot(v: unknown, fallback: ModelSlotConfig): ModelSlotConfig {
 }
 
 export function defaultDualModelConfig(): DualModelConfig {
+  const siliconBase =
+    env('VITE_LLM_BASE_URL') || env('VITE_EMBED_BASE_URL') || SILICONFLOW_BASE
+  const siliconKey = env('VITE_LLM_API_KEY') || env('VITE_EMBED_API_KEY') || ''
   return {
     ocr: {
-      // Vite proxy → 智谱 layout_parsing；无 Key 时用服务端 ZHIPU_API_KEY
+      // 本地 Vite / 线上 Vercel 均走 /api/zhipu；Key 用服务端 ZHIPU_API_KEY
       baseUrl: env('VITE_OCR_BASE_URL') || '/api/zhipu',
-      apiKey: env('VITE_OCR_API_KEY') || env('ZHIPU_API_KEY') || '',
+      apiKey: env('VITE_OCR_API_KEY') || '',
       model: env('VITE_OCR_MODEL') || 'glm-ocr',
     },
     embed: {
-      baseUrl:
-        env('VITE_EMBED_BASE_URL') ||
-        env('VITE_LLM_BASE_URL') ||
-        'https://api.openai.com/v1',
-      apiKey: env('VITE_EMBED_API_KEY') || env('VITE_LLM_API_KEY') || '',
-      model: env('VITE_EMBED_MODEL') || 'text-embedding-3-small',
+      baseUrl: env('VITE_EMBED_BASE_URL') || siliconBase,
+      apiKey: env('VITE_EMBED_API_KEY') || siliconKey,
+      model: env('VITE_EMBED_MODEL') || DEFAULT_EMBED_MODEL,
     },
     reason: {
-      baseUrl: env('VITE_LLM_BASE_URL') || 'https://api.openai.com/v1',
-      apiKey: env('VITE_LLM_API_KEY') || '',
-      model: env('VITE_LLM_MODEL') || 'gpt-4o-mini',
+      baseUrl: siliconBase,
+      apiKey: siliconKey,
+      model: env('VITE_LLM_MODEL') || DEFAULT_REASON_MODEL,
     },
     autoOcrOnUpload: true,
   }

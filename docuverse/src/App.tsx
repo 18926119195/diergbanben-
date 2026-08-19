@@ -8,7 +8,9 @@ import { ConstructionLensControls } from './ui/ConstructionLensControls'
 import { ViewPathTimeline } from './ui/ViewPathTimeline'
 import { EmphasisStarMap } from './ui/EmphasisStarMap'
 import { ReasoningPilotPanel } from './ui/ReasoningPilotPanel'
+import { InterviewAbPanel } from './ui/InterviewAbPanel'
 import { ReasoningFloorDock } from './ui/ReasoningFloorDock'
+import { isPublicDemo } from './demoMode'
 import './App.css'
 
 export default function App() {
@@ -19,7 +21,8 @@ export default function App() {
         <CvsScene />
       </main>
       <HUD />
-      <ReasoningPilotPanel />
+      <InterviewAbPanel solo={isPublicDemo} />
+      {!isPublicDemo && <ReasoningPilotPanel />}
       <ReasoningFloorDock />
       <EmphasisStarMap />
       <WorkbenchPalette />

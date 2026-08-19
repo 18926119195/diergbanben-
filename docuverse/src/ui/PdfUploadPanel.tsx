@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { isPublicDemo } from '../demoMode'
 import { importPdfFile } from '../data/pdfImport'
 import { loadDualModelConfig } from '../reasoning/modelRuntimeConfig'
 import { useIndexGate } from '../reasoning/indexGate'
@@ -7,7 +8,9 @@ import { useDocuverse } from '../cvs/store'
 export function PdfUploadPanel() {
   const inputRef = useRef<HTMLInputElement>(null)
   const applyUploadedUniverse = useDocuverse((s) => s.applyUploadedUniverse)
-  const clearWorkspaceAnnotations = useDocuverse((s) => s.clearWorkspaceAnnotations)
+  const clearWorkspaceAnnotations = useDocuverse(
+    (s) => s.clearWorkspaceAnnotations,
+  )
   const setUploadProgress = useDocuverse((s) => s.setUploadProgress)
   const uploadProgress = useDocuverse((s) => s.uploadProgress)
   const corpus = useDocuverse((s) => s.corpus)
@@ -36,7 +39,7 @@ export function PdfUploadPanel() {
     setError(null)
     setBusy(true)
     resetIndex()
-    setImporting('正在渲染 PDF…')
+    setImporting('正在打开 PDF…')
     try {
       const result = await importPdfFile(file, (p) => {
         setUploadProgress({
@@ -50,38 +53,37 @@ export function PdfUploadPanel() {
 
       const cfg = loadDualModelConfig()
       const docId = `upload:${result.label}`
-      // Always OCR pages without text layer (user pipeline: import → OCR → embed → ask)
       const shouldOcr = cfg.autoOcrOnUpload !== false
       if (shouldOcr) {
         useIndexGate.setState({
           phase: 'ocr',
-          message: '正在 OCR 无文字页…',
+          message: '正在识别扫描页…',
           ready: false,
         })
         setUploadProgress({
           current: 0,
           total: 1,
-          message: '上传完成 · 自动 OCR…',
+          message: '正在识别扫描页…',
         })
         const pageCount = useDocuverse.getState().pages.length
         const { done, failed } = await runOcrOnPagesLackingText({
           maxPages: Math.max(pageCount, 1),
-          onProgress: (d, t, strand) => {
+          onProgress: (d, t) => {
             setUploadProgress({
               current: d,
               total: t,
-              message: `OCR ${d}/${t}（页 s${strand}）`,
+              message: `处理中 ${d}/${t} 页`,
             })
             useIndexGate.setState({
               phase: 'ocr',
-              message: `OCR ${d}/${t}（页 s${strand}）`,
+              message: `处理中 ${d}/${t} 页`,
             })
           },
         })
         setUploadProgress(null)
         if (failed > 0) {
           setError(
-            `OCR 完成 ${done} 页，失败 ${failed} 页；将继续用已有结果建索引`,
+            `部分页面未能识别（${failed}/${done + failed}）· 将使用已有结果继续`,
           )
         }
       }
@@ -89,7 +91,7 @@ export function PdfUploadPanel() {
       setUploadProgress({
         current: 0,
         total: 1,
-        message: '正在 Embedding（审计）…',
+        message: '正在整理文献…',
       })
       const { pages, ocrByStrand } = useDocuverse.getState()
       await finalizeIndex({ docId, pages, ocrByStrand })
@@ -108,9 +110,13 @@ export function PdfUploadPanel() {
   return (
     <section className="hud-panel upload">
       <h2>上传 PDF</h2>
-      <p className="meta">
-        流水线：导入 → OCR（无字页）→ Embedding → 就绪后才可 V_q 提问
-      </p>
+      {isPublicDemo ? (
+        <p className="meta">上传后可在右侧输入问题并对照出处</p>
+      ) : (
+        <p className="meta">
+          流水线：导入 → OCR（无字页）→ Embedding → 就绪后才可 V_q 提问
+        </p>
+      )}
       <input
         ref={inputRef}
         type="file"
@@ -130,11 +136,11 @@ export function PdfUploadPanel() {
         type="button"
         className="corpus-chip"
         disabled={busy}
-        title="清除强调圈、紫线、OCR 粘结与本地缓存；页面保留"
+        title="清除标注；页面保留"
         onClick={() => {
           if (
             !window.confirm(
-              '清除全部强调 / 连线 / 粘结标注？页面会保留，可继续导入或重画。',
+              '清除全部强调 / 连线标注？页面会保留，可继续导入。',
             )
           ) {
             return
@@ -150,7 +156,7 @@ export function PdfUploadPanel() {
       )}
       {indexReady && (
         <p className="meta" style={{ color: '#5cffb1' }}>
-          ✓ {indexMessage} · 可在右侧提问
+          ✓ {indexMessage}
         </p>
       )}
       {uploadProgress && (

@@ -36,7 +36,7 @@ export function HUD() {
     <div className="hud">
       <header className="hud-brand">
         <div className="brand-mark">DOCUMVERSE</div>
-        <div className="brand-sub">Ted Nelson · CVS 连接宇宙</div>
+        <div className="brand-sub">CVS 连接宇宙</div>
         <button
           type="button"
           className="upload-btn hud-workbench-launch"
@@ -114,7 +114,8 @@ export function HUD() {
           )}
           {ocrError && <p className="upload-error">{ocrError}</p>}
           <p className="hint">
-            OCR → 确认 → 密封绑定。紫线建联：空格工作台 · 先选 A 再选 B · 关联台观察候选。
+            OCR → 确认 → 密封绑定。紫线建联：空格工作台 · 先选 A 再选 B ·
+            关联台观察候选。
           </p>
         </div>
       </section>
@@ -209,8 +210,8 @@ export function HUD() {
           </button>
         </div>
         <p className="hint">
-          球面宇宙：右键滑外球写机位轴 · 滚轮改半径 · Enter
-          锁强调为建联 A · 右下角星图点 B
+          球面宇宙：右键滑外球写机位轴 · 滚轮改半径 · Enter 锁强调为建联 A ·
+          右下角星图点 B
         </p>
       </section>
     </div>

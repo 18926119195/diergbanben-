@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useDocuverse } from '../cvs/store'
+import { isPublicDemo } from '../demoMode'
 import {
   buildEmphasisPacket,
   downloadEmphasisPacketJson,
@@ -223,14 +224,16 @@ export function EmphasisAgentPanel() {
       </div>
 
       <div className="ocr-edit-toolbar">
-        <button
-          type="button"
-          className="corpus-chip"
-          disabled={exportBusy || edges.length === 0}
-          onClick={() => void onExportPacket()}
-        >
-          {exportBusy ? '打包中…' : '导出 catalog 数据包'}
-        </button>
+        {!isPublicDemo && (
+          <button
+            type="button"
+            className="corpus-chip"
+            disabled={exportBusy || edges.length === 0}
+            onClick={() => void onExportPacket()}
+          >
+            {exportBusy ? '打包中…' : '导出 catalog 数据包'}
+          </button>
+        )}
       </div>
       {exportNote && <p className="meta">{exportNote}</p>}
 

@@ -81,8 +81,8 @@ export const useIndexGate = create<IndexGateState>((set) => ({
       ready,
       phase: ready ? 'ready' : 'embedding',
       message: ready
-        ? `索引就绪 · ${index.chunks.length} 原子`
-        : '索引更新中…',
+        ? `文献就绪 · ${index.chunks.length} 段可检索`
+        : '文献整理中…',
       lastError: null,
     })
   },
@@ -90,24 +90,20 @@ export const useIndexGate = create<IndexGateState>((set) => ({
   finalizeIndex: async (input) => {
     set({
       phase: 'embedding',
-      message: '正在建立 A1 并审计 Embedding…',
+      message: '正在整理文献…',
       ready: false,
       lastError: null,
     })
     try {
       const raw = buildBookIndex(input)
-      const { index, usedApi } = await reembedBookIndex(raw)
+      const { index } = await reembedBookIndex(raw)
       saveBookIndex(index)
       set({
         bookIndex: index,
         ready: true,
         phase: 'ready',
-        message: usedApi
-          ? `索引就绪 · ${index.chunks.length} 原子 · 真 Embedding`
-          : `索引就绪 · ${index.chunks.length} 原子 · 假向量（未配审计 Key）`,
-        lastError: usedApi
-          ? null
-          : '审计 Embedding 未配置，V_q 仅假向量排序',
+        message: `文献就绪 · ${index.chunks.length} 段可检索`,
+        lastError: null,
       })
       return index
     } catch (e) {

@@ -588,8 +588,10 @@ export function ReasoningPilotPanel() {
       <section className="reasoning-block">
         <h3>模型部署</h3>
         <p className="reasoning-muted">
-          三槽分职：OCR 建文字/图块 → Embedding 审计寻址 → Chat
-          留房推理。可同一家 Key；保存写入本机。上传可自动串 OCR。
+          默认栈：智谱 OCR（glm-ocr）+ 硅基流动（Chat /
+          DeepSeek-V4-Flash · Embed / Qwen3-VL-Embedding-8B，同一 Key）。保存写
+          入本机；上 Vercel 时配 ZHIPU_API_KEY 与 VITE_LLM_* 即可，路径仍是
+          /api/zhipu。
         </p>
         <p className="reasoning-mono">OCR / 版面（建 A1 字脸）</p>
         <input
@@ -605,7 +607,7 @@ export function ReasoningPilotPanel() {
         />
         <input
           className="reasoning-input"
-          placeholder="API Key（空则用 Vite 代理侧 ZHIPU_API_KEY）"
+          placeholder="API Key（空则用服务端 ZHIPU_API_KEY 代理）"
           type="password"
           autoComplete="off"
           value={modelCfg.ocr.apiKey}
@@ -618,7 +620,7 @@ export function ReasoningPilotPanel() {
         />
         <input
           className="reasoning-input"
-          placeholder="Model（如 glm-ocr）"
+          placeholder="Model（glm-ocr）"
           value={modelCfg.ocr.model}
           onChange={(e) =>
             setModelCfg({
@@ -640,10 +642,10 @@ export function ReasoningPilotPanel() {
           />{' '}
           上传后对无文字层页自动 OCR（最多 40 页）
         </label>
-        <p className="reasoning-mono">审计（Embedding）</p>
+        <p className="reasoning-mono">审计（Embedding · 硅基流动）</p>
         <input
           className="reasoning-input"
-          placeholder="Base URL"
+          placeholder="Base URL（默认同推理硅基流动）"
           value={modelCfg.embed.baseUrl}
           onChange={(e) =>
             setModelCfg({
@@ -654,7 +656,7 @@ export function ReasoningPilotPanel() {
         />
         <input
           className="reasoning-input"
-          placeholder="API Key"
+          placeholder="API Key（默认同 VITE_LLM_API_KEY）"
           type="password"
           autoComplete="off"
           value={modelCfg.embed.apiKey}
@@ -667,7 +669,7 @@ export function ReasoningPilotPanel() {
         />
         <input
           className="reasoning-input"
-          placeholder="Model（如 text-embedding-3-small）"
+          placeholder="Model（Qwen/Qwen3-VL-Embedding-8B；勿填 Chat）"
           value={modelCfg.embed.model}
           onChange={(e) =>
             setModelCfg({
@@ -676,10 +678,10 @@ export function ReasoningPilotPanel() {
             })
           }
         />
-        <p className="reasoning-mono">推理（Chat）</p>
+        <p className="reasoning-mono">推理（Chat · 硅基流动）</p>
         <input
           className="reasoning-input"
-          placeholder="Base URL"
+          placeholder="Base URL（https://api.siliconflow.cn/v1）"
           value={modelCfg.reason.baseUrl}
           onChange={(e) =>
             setModelCfg({

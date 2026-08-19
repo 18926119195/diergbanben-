@@ -1489,6 +1489,154 @@ body.emphasize-pen-on .workbench-root * {
   font-size: 0.92em;
 }
 
+/* —— 对照台（同问同选 · 双列索引） —— */
+.interview-ab-panel {
+  position: absolute;
+  z-index: 12;
+  top: 12px;
+  right: min(388px, calc(12px + 360px + 16px));
+  width: min(420px, 48vw);
+  max-height: calc(100% - 56px);
+  overflow: auto;
+  padding: 14px 14px 18px;
+  border: 1px solid rgba(92, 255, 177, 0.35);
+  border-radius: 10px;
+  background: linear-gradient(
+    160deg,
+    rgba(12, 16, 26, 0.94),
+    rgba(10, 14, 22, 0.88)
+  );
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+}
+
+.interview-pick-list,
+.interview-idx-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.interview-pick-btn,
+.interview-idx-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.interview-pick-btn:hover,
+.interview-idx-btn:hover {
+  border-color: rgba(92, 255, 177, 0.45);
+  background: rgba(92, 255, 177, 0.06);
+}
+
+.interview-pick-on {
+  border-color: rgba(92, 255, 177, 0.7);
+  background: rgba(92, 255, 177, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(92, 255, 177, 0.25);
+}
+
+.interview-dual {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.interview-dual-col {
+  min-width: 0;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.interview-dual-col[data-side='A'] {
+  border-color: rgba(120, 180, 255, 0.35);
+}
+
+.interview-dual-col[data-side='B'] {
+  border-color: rgba(92, 255, 177, 0.4);
+}
+
+.interview-dual-col h3 {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+}
+
+.interview-dual-tag {
+  margin: 0 0 8px;
+  font-size: 0.72rem;
+  opacity: 0.85;
+  word-break: break-all;
+}
+
+.interview-idx-primary {
+  border-color: rgba(255, 200, 100, 0.45);
+}
+
+.interview-idx-on {
+  border-color: rgba(92, 255, 177, 0.85);
+  background: rgba(92, 255, 177, 0.14);
+}
+
+.interview-truth-btn {
+  border-color: rgba(255, 220, 120, 0.55);
+  background: rgba(255, 220, 120, 0.08);
+}
+
+.interview-truth .interview-pick-on {
+  border-color: rgba(255, 220, 120, 0.85);
+  box-shadow: inset 0 0 0 1px rgba(255, 220, 120, 0.35);
+}
+
+.interview-demo-tip {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: rgba(200, 230, 255, 0.88);
+  border-radius: 8px;
+  border: 1px dashed rgba(120, 180, 255, 0.35);
+  background: rgba(80, 140, 220, 0.08);
+}
+
+.interview-demo-tip strong {
+  color: rgba(160, 210, 255, 1);
+  font-weight: 600;
+}
+
+@media (max-width: 1100px) {
+  .interview-ab-panel {
+    right: 12px;
+    top: auto;
+    bottom: 56px;
+    width: min(420px, 94vw);
+    max-height: 48vh;
+  }
+
+  .interview-dual {
+    grid-template-columns: 1fr;
+  }
+}
+
+.interview-ab-solo {
+  right: 12px;
+  width: min(440px, 94vw);
+}
+
 /* —— 推理驾驭面板（右上，不挡星图过多） —— */
 .reasoning-pilot {
   position: absolute;
