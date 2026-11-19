@@ -1,0 +1,23 @@
+diergbanben-｜A/B 证据对照演示
+开发时间线（原话、实现提交、源码行号和验证）见同目录 DEVELOPMENT_HISTORY.txt。
+https://github.com/18926119195/diergbanben-/blob/main/DEVELOPMENT_HISTORY.txt
+核验 Git 提交 08a712e2002f1368a883009eb104ee3ad2e4cd79
+协作总导航 https://github.com/18926119195/docuverse/blob/main/MAINTAINERS.txt
+
+这个库在开发什么
+应用在 docuverse/。在 Pilot 的基础上，正常入口增加同次提问的 A/B 对照、主要依据定位和回执。B 面板的记录能说明选了哪个主要证据；附在问题里的候选摘录也会进模型可读输入。
+
+首次阅读的代码入口
+App.tsx → InterviewAbPanel.tsx → pilot 的检索和推理路径。涉及证据约束时验证最终请求体。
+https://github.com/18926119195/diergbanben-/blob/08a712e2002f1368a883009eb104ee3ad2e4cd79/docuverse/src/App.tsx
+https://github.com/18926119195/diergbanben-/blob/08a712e2002f1368a883009eb104ee3ad2e4cd79/docuverse/src/ui/InterviewAbPanel.tsx#L77
+
+相关聊天原件
+库内未发现完整会话。旁路库用户核对「A1. 本库与原库 `diergbanben-` 的关系是什么？是否应推回原库？」；这是 fanout 的核对文，不是该库的聊天。
+https://github.com/18926119195/diergbanben-fanout/blob/b5495d32fd083acae9f239e694e7a585723911d0/chat%20history#L749
+
+维护边界和下次接续
+保留为用户可复跑的对照演示。下一次变动拆成 A/B 传输对照和证据限制两个验收项。先固定同一问题、候选及实际请求，再决定是否改变附加文本。
+本文件只依据 Git 提交关系、可定位的聊天原件和源码。候选改动需要以正常入口及复跑证据验收。
+
+文件整理与旧路径映射见 docs/archive/PATHS.txt。

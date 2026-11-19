@@ -5,8 +5,8 @@ import path from 'node:path'
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   // Load parent workspace .env as well as local
-  const rootEnv = loadEnv(mode, path.resolve(__dirname, '..'), '')
-  const localEnv = loadEnv(mode, __dirname, '')
+  const rootEnv = loadEnv(mode, path.resolve(import.meta.dirname, '..'), '')
+  const localEnv = loadEnv(mode, import.meta.dirname, '')
   const apiKey =
     localEnv.ZHIPU_API_KEY ||
     rootEnv.ZHIPU_API_KEY ||

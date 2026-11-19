@@ -3,14 +3,16 @@
  * Results still map 1:1 to existing place atoms / key* — never invent locks.
  */
 
-export function atomSearchText(input: {
+interface SearchableAtom {
   kind: string
   content: string
   faces: {
     text?: { content: string }
-    fig?: { note: string; figId: string }
+    fig?: { note: string }
   }
-}): string {
+}
+
+export function atomSearchText(input: SearchableAtom): string {
   const text = input.faces.text?.content?.trim()
   if (text && text.length >= 8) return text
   // Prefer stream content over fig boilerplate
@@ -41,18 +43,7 @@ export function tokenizeQuery(text: string): string[] {
   return out
 }
 
-function tokenizeDoc(text: string): string[] {
-  return tokenizeQuery(text)
-}
-
-export function isRetrievableAtom(input: {
-  kind: string
-  content: string
-  faces: {
-    text?: { content: string }
-    fig?: { note: string }
-  }
-}): boolean {
+export function isRetrievableAtom(input: SearchableAtom): boolean {
   const t = atomSearchText(input)
   if (t.length < 4) return false
   // Drop near-empty fig placeholders
@@ -67,7 +58,7 @@ function bm25Scores(
   const N = docs.length
   if (N === 0 || queryTokens.length === 0) return docs.map(() => 0)
 
-  const tokenized = docs.map(tokenizeDoc)
+  const tokenized = docs.map(tokenizeQuery)
   const df = new Map<string, number>()
   for (const toks of tokenized) {
     const uniq = new Set(toks)
