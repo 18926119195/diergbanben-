@@ -1,8 +1,8 @@
 diergbanben-｜A/B 证据对照演示
 开发时间线（原话、实现提交、源码行号和验证）见同目录 DEVELOPMENT_HISTORY.txt。
-https://github.com/18926119195/diergbanben-/blob/codex/repository-cleanup/DEVELOPMENT_HISTORY.txt
+https://github.com/18926119195/diergbanben-/blob/main/DEVELOPMENT_HISTORY.txt
 核验 Git 提交 08a712e2002f1368a883009eb104ee3ad2e4cd79
-协作总导航 https://github.com/18926119195/docuverse/blob/codex/repository-cleanup/MAINTAINERS.txt
+协作总导航 https://github.com/18926119195/docuverse/blob/main/MAINTAINERS.txt
 
 这个库在开发什么
 应用在 docuverse/。在 Pilot 的基础上，正常入口增加同次提问的 A/B 对照、主要依据定位和回执。B 面板的记录能说明选了哪个主要证据；附在问题里的候选摘录也会进模型可读输入。
