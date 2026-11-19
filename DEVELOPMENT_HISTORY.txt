@@ -1,0 +1,82 @@
+diergbanben- 开发时间线
+核验基线 main 08a712e2002f1368a883009eb104ee3ad2e4cd79
+整理 PR #1；本次读取的整理提交 4ec2c0ed1c9e8f098fd177f621506230276b750b。
+https://github.com/18926119195/diergbanben-/pull/1
+
+菜单
+D01　3D 文献工作区与强调搜索
+D02　圈选 A1 原子与单锁送模
+D03　按槽检索、混合排序与回放
+D04　一轮推理的 A/B 出处对照
+D05　旁路扇出与后续聊天证据
+D06　构建修复和文件整理
+RUN　当前入口和复验
+OPEN　仍待验证的主张
+
+来源范围
+时间为 Git 作者时间，统一换算为北京时间。可见历史、当前主分支和交付 ZIP 中没有本仓自己的聊天原件。下列聊天原句来自后续独立仓库 diergbanben-fanout。其入库时间和行顺序可核对，各条发言的时钟时间缺失。Git 提交时间线可以说明代码何时进入已见历史，不能代替本仓的聊天时间线。
+
+D01　2026-08-09 09:04:29｜3D 文献工作区与强调搜索
+034ebe5fbbec5b4a17092f57aae2012561a9530e
+App 挂载 3D 画布、HUD 和键盘导航。强调搜索面板先查本地评论，必要时请求结构目录搜索，继续全书粗搜前要求用户确认。这条级联分支与后来的多路径扇出分开。
+https://github.com/18926119195/diergbanben-/blob/034ebe5fbbec5b4a17092f57aae2012561a9530e/docuverse/src/App.tsx#L12-L31
+https://github.com/18926119195/diergbanben-/blob/034ebe5fbbec5b4a17092f57aae2012561a9530e/docuverse/src/ui/EmphasisAgentPanel.tsx#L73-L132
+
+D02　2026-08-16 13:51:09｜圈选 A1 原子与单锁送模
+0afde81901228443c804bf8503c6fdac41f1632e
+PDF 文本或 OCR 形成带页与位置的 A1 原子，圈选从该页现有原子锁定候选。Pilot 把选定坐标、对应文本、问题和可选旧方向排除项交给 Bundle，再走模型客户端。模型设置为空时返回标为 Mock 的结果。
+https://github.com/18926119195/diergbanben-/blob/0afde81901228443c804bf8503c6fdac41f1632e/docuverse/src/reasoning/pipelineA.ts#L356-L419
+https://github.com/18926119195/diergbanben-/blob/0afde81901228443c804bf8503c6fdac41f1632e/docuverse/src/reasoning/pipelineA.ts#L569-L611
+https://github.com/18926119195/diergbanben-/blob/0afde81901228443c804bf8503c6fdac41f1632e/docuverse/src/ui/ReasoningPilotPanel.tsx#L293-L342
+https://github.com/18926119195/diergbanben-/blob/0afde81901228443c804bf8503c6fdac41f1632e/docuverse/src/reasoning/llmClient.ts#L55-L84
+
+D03　2026-08-17 19:45:58｜按槽检索、混合排序与回放
+3995fc9e8fd5b48e0d072d0a26a647a9e5e55a1a
+makeSlotKey 以文档、页和槽序登记身份。问题检索在现有槽上使用查询扩展、词法或服务向量、余弦与 BM25 混合排序，候选继续持有原槽的 key 和页框。索引用浏览器 localStorage 保存。后续 19:51:45 的提交 d4c188a 仅增加克隆说明，同时是 hypertext-interact 的公开 main 分支头，并直接连接到本仓 D04。
+https://github.com/18926119195/diergbanben-/blob/3995fc9e8fd5b48e0d072d0a26a647a9e5e55a1a/docuverse/src/reasoning/ocrSlot.ts#L19-L26
+https://github.com/18926119195/diergbanben-/blob/3995fc9e8fd5b48e0d072d0a26a647a9e5e55a1a/docuverse/src/reasoning/pipelineA.ts#L712-L810
+https://github.com/18926119195/diergbanben-/blob/3995fc9e8fd5b48e0d072d0a26a647a9e5e55a1a/docuverse/src/reasoning/hybridRetrieve.ts#L124-L163
+https://github.com/18926119195/diergbanben-/blob/3995fc9e8fd5b48e0d072d0a26a647a9e5e55a1a/docuverse/src/reasoning/bookIndexStore.ts#L61-L105
+https://github.com/18926119195/diergbanben-/commit/d4c188a541c758c4ba691ae7088dc82b87f56269
+
+D04　2026-08-19 17:55:56｜一轮推理的 A/B 出处对照
+08a712e2002f1368a883009eb104ee3ad2e4cd79
+App 挂载 InterviewAbPanel。一次推理调用冻结所选候选，回溯 B 按该候选定位；回溯 A 读取模型返回的出处编号，缺编号则标检索首项。buildDemoQuestion 还把其他候选短摘写入问题，因此整个请求含所选主要依据与候选目录。回执保存在面板状态。提交同时增加智谱 Vercel Edge 代理，开发环境使用 Vite 代理。
+https://github.com/18926119195/diergbanben-/blob/08a712e2002f1368a883009eb104ee3ad2e4cd79/docuverse/src/App.tsx#L16-L27
+https://github.com/18926119195/diergbanben-/blob/08a712e2002f1368a883009eb104ee3ad2e4cd79/docuverse/src/ui/InterviewAbPanel.tsx#L36-L72
+https://github.com/18926119195/diergbanben-/blob/08a712e2002f1368a883009eb104ee3ad2e4cd79/docuverse/src/ui/InterviewAbPanel.tsx#L240-L329
+https://github.com/18926119195/diergbanben-/blob/08a712e2002f1368a883009eb104ee3ad2e4cd79/docuverse/api/zhipu/%5B...path%5D.ts#L1-L52
+
+D05　2026-08-23～24｜旁路扇出与后续聊天证据
+fanout 以无父提交的 9a94415ea976c2eb3b9afff334456bf84fc65bc0 建立了独立 Git 历史。两库部分同路径源码具有相同 blob。本仓 08a712e 保留 InterviewAbPanel，fanout 的 534af6b 对应的是删除自己的 GatewayFormalizeAbPanel 和 abCompareRunner。
+https://github.com/18926119195/diergbanben-fanout/commit/9a94415ea976c2eb3b9afff334456bf84fc65bc0
+https://github.com/18926119195/diergbanben-fanout/commit/534af6b7950cbff2084cf48eb62733b351291175
+
+fanout 聊天入库时间 2026-08-24 13:49:58。Assistant 第 94 行原文
+「FORK.md：说明这是从 diergbanben- 旁路复制出来的独立改造库」
+https://github.com/18926119195/diergbanben-fanout/blob/716939b9be634b2e4b53ab5644ef70942a5e20a4/chat%20history#L94
+
+同一导出中，User 第 749 行原文
+「A1. 本库与原库 `diergbanben-` 的关系是什么？是否应推回原库？」
+同一导出中，Assistant 第 2103 行原文
+「主链已是 infer-ops 单路径，classic infer / A/B 对照台已移除（toolGateway.ts、App.tsx）。」
+这些消息讨论 fanout 自己的统一推理出口及旧对照组件。同一出口允许生成多条候选路径。
+https://github.com/18926119195/diergbanben-fanout/blob/716939b9be634b2e4b53ab5644ef70942a5e20a4/chat%20history#L749
+https://github.com/18926119195/diergbanben-fanout/blob/716939b9be634b2e4b53ab5644ef70942a5e20a4/chat%20history#L2103
+
+D06　2026-11-19 13:30:55、15:43:07｜构建修复和文件整理
+ad896bf546a7fe479c85ed47c2e2329e744a2717 修复混合检索参数类型和三个未使用声明导致的 TypeScript 构建错误，调整 Vite 配置和 vendor lint 范围。
+4ec2c0ed1c9e8f098fd177f621506230276b750b 修正 favicon 路径并移走归档资料。根目录的 54 张重复页图从整理树移除，每张都有完全相同的 Git blob 留在 docuverse/public/pdf-pages/。页面源码现行路径不加载内置专利页图，公开目录仍可直接访问。PDF 上传渲染继续使用 public/pdfjs-wasm/。
+https://github.com/18926119195/diergbanben-/commit/ad896bf546a7fe479c85ed47c2e2329e744a2717
+https://github.com/18926119195/diergbanben-/commit/4ec2c0ed1c9e8f098fd177f621506230276b750b
+https://github.com/18926119195/diergbanben-/blob/08a712e2002f1368a883009eb104ee3ad2e4cd79/docuverse/src/data/pdfUniverse.ts#L1-L25
+https://github.com/18926119195/diergbanben-/blob/08a712e2002f1368a883009eb104ee3ad2e4cd79/docuverse/src/data/pdfImport.ts#L57-L65
+
+RUN　当前入口和复验
+在 docuverse/ 使用 Node v24 和锁文件安装。npm ci、npm run dev、npm run build、npm run lint。界面入口 src/main.tsx → src/App.tsx；上传入口 src/ui/PdfUploadPanel.tsx；A/B 对照 src/ui/InterviewAbPanel.tsx；完整单锁面板 src/ui/ReasoningPilotPanel.tsx，VITE_PUBLIC_DEMO=false 时挂载。
+基线 08a712e 的仓库 build 退出 2。整理提交 ad896bf 的 build、lint 退出 0，lint 保留 14 条源码警告。Vite preview 的首页与样例页图返回 HTTP 200。合成页面运行验证 A1 文本与图像同锁、词法/BM25、检索与圈选同键同框、索引保存读取、无凭据 Mock、配置分支请求序列化和响应解析。外部 fetch 在测试中换成响应桩。
+https://github.com/18926119195/diergbanben-/blob/4ec2c0ed1c9e8f098fd177f621506230276b750b/docuverse/package.json#L6-L11
+https://github.com/18926119195/diergbanben-/blob/4ec2c0ed1c9e8f098fd177f621506230276b750b/docuverse/src/App.tsx#L16-L32
+
+OPEN　仍待验证的主张
+真实 OCR、远端嵌入、模型生成、Vercel 部署以及浏览器端到端尚未验收。A/B 面板状态可以证明选定主要依据及其定位，判断请求中全部材料需要对照序列化消息，判断模型内部使用了什么前提需要另外的模型验证。未见模型注意力控制或 fanout 网关在本仓主入口接入。
